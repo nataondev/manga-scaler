@@ -1,69 +1,87 @@
-# Scraping Komik Fansub (komiku.org)
+# Manga Scaler
 
-Tools ini adalah sebuah alat untuk melakukan scraping komik dari situs **[komiku.org](https://komiku.org)** dan melakukan auto scaling gambar komik menggunakan **[waifu2x-ncnn-vulkan](https://github.com/nihui/waifu2x-ncnn-vulkan)** agar resolusi gambar tidak low (sakit mata). Oh iya, juga tidak lupa menyediakan viewer untuk membaca komik yang sudah di simpan.
+Tools untuk scraping komik dari berbagai situs, auto upscale gambar dengan **waifu2x-ncnn-vulkan** (AI), lalu kompresi ke **WebP** via sharp. Dilengkapi web viewer untuk membaca komik yang sudah diunduh.
 
 ## Fitur
-- Scraping komik dari **komiku.org**.
-- Auto scaling kualitas gambar komik menggunakan **waifu2x**.
-- Web viewer untuk membaca komik yang telah di simpan.
 
-## Perisiapan
+- **Multi-source**: komiku.org, mangatown.com (mudah tambah situs baru via plugin)
+- **AI Upscale**: waifu2x-ncnn-vulkan untuk gambar <900px width
+- **WebP Compression**: sharp WebP quality 85%, file jauh lebih kecil
+- **Web Viewer**: baca komik langsung di browser
+- **SQLite**: tracking download, resume support, history
+- **Pagination Chapter Browser**: list chapter per 10 dengan navigasi
 
-### 1. Cara Kerja 
-Tools ini akan melakukan scraping komik dengan url komik dari komiku, lalu melakukan scaling otomatis gambar komik menggunakan **[waifu2x-ncnn-vulkan](https://github.com/nihui/waifu2x-ncnn-vulkan)**. 
-Pastikan folder waifu2x sudah diatur di file .env.
+## Persiapan
 
-#### Persiapan:
+### 1. Requirements
+- **[Bun](https://bun.sh)** runtime
+- **[waifu2x-ncnn-vulkan](https://github.com/nihui/waifu2x-ncnn-vulkan/releases)** — download binary sesuai OS
 
-- Pastikan kamu telah menginstal **[Bun](https://bun.sh)** untuk menjalankan proyek ini.
-- waifu2x-ncnn-vulkan: Unduh dan setup **[waifu2x-ncnn-vulkan](https://github.com/nihui/waifu2x-ncnn-vulkan)** sesuai dokumentasinya.
-
-#### Pengaturan:
-- Download relase waifu2x sesuai OS yang digunakan.
-- Folder waifu2x: Tentukan path folder waifu2x di file .env
-- Folder penyimpanan defaultnya: komik/
-
-#### Struktur Folder
-```plaintext
-📁 manga-scaler/
-├── scrap.ts        # Script untuk scraping komik
-├── index.ts        # Script untuk menjalankan viewer
-├── komik/          # Folder default penyimpanan komik
-├── .env            # File untuk konfigurasi folder waifu2x
-```
-
-#### Install Dependensi
-``` bash
+### 2. Install
+```bash
+./install.sh
+# atau manual:
 bun install
+cp env.example .env
 ```
 
-### 2. Scraping Komik
-Untuk menjalankan proses scraping, gunakan perintah berikut:
-```bash
-bun run scrap
-
-#atau
-
-bun scrap.ts
+### 3. Konfigurasi `.env`
+```env
+WEB_SERVER_PORT=5000
+WAIFU2X_PATH=~/Repos/tools/waifu2x/waifu2x-ncnn-vulkan
+MIN_IMAGE_WIDTH=900      # <= threshold untuk upscale
+WEBP_QUALITY=85           # quality WebP output
+NOISE_REDUCTION=2         # waifu2x noise reduction
+SCALE_FACTOR=2            # waifu2x scale factor
 ```
-Kemudian paste URL awal komik (bukan dichapter, tapi di list chapter). Pilih chapter untuk memulai download. Misal 5 atau 5.1 atau 5-1 sesuai chapter list komik.
 
-### 3. Menjalankan Web Viewer
-Untuk menjalankan viewer komik, gunakan salah satu dari perintah berikut:
+## Struktur
+```
+📁 manga-scaler/
+├── scrap.ts              # Entry point scraping
+├── index.ts              # Web viewer server
+├── lib/
+│   ├── core.ts           # Config, utils, ImageProcessor
+│   ├── db.ts             # SQLite schema + CRUD
+│   └── sites/
+│       ├── komiku.ts     # Scraper komiku.org
+│       └── mangatown.ts  # Scraper mangatown.com
+├── public/               # Web viewer frontend
+├── data/                 # SQLite database
+└── komik/                # Output folder gambar
+```
+
+## Penggunaan
+
+### Scraping
 ```bash
-bun .
+bun scrap
+```
+Pilih history atau paste URL. Sistem auto-detect situs dari URL.
 
-# atau
-
-bun index.ts
-
-# atau
-
+### Web Viewer
+```bash
 bun serve
+# atau
+bun .
 ```
+Buka `http://localhost:5000`
 
-#### Kontribusi
-Jika kamu menemukan bug atau memiliki ide untuk fitur baru, jangan ragu untuk membuat issue atau pull request! Atau bisa juga langsung modifikasi sendiri.
+## Menambah Situs Baru
 
-### Lisensi
-**MIT License**.
+Buat file di `lib/sites/`, implement interface `SiteScraper`:
+```ts
+export const myScraper: SiteScraper = {
+  name: "mysite",
+  referer: "https://mysite.com/",
+  match(url) { return url.includes("mysite.com"); },
+  async getComicTitle(url) { ... },
+  async listChapters(url) { ... },
+  async scrapeImages(url) { ... },
+  parseChapter(url) { ... },
+};
+```
+Daftarkan di array `SCRAPERS` di `scrap.ts`.
+
+## Lisensi
+MIT

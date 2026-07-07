@@ -181,6 +181,11 @@ komik/*
 history.txt
 history-berwarna.txt
 
+# Database
+manga.db
+manga.db-wal
+manga.db-shm
+
 # Lock files (use bun.lockb only)
 package-lock.json
 

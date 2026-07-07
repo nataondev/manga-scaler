@@ -37,8 +37,8 @@ $(document).ready(function () {
   // API endpoints
   const API = {
     getKomik: () => `${baseUrl}/api/komik`,
-    getChapters: (judul) => `${baseUrl}/api/komik/${judul}`,
-    getImages: (judul, chapter) => `${baseUrl}/api/komik/${judul}/${chapter}`,
+    getChapters: (judul) => `${baseUrl}/api/komik/${encodeURIComponent(judul)}`,
+    getImages: (judul, chapter) => `${baseUrl}/api/komik/${encodeURIComponent(judul)}/${encodeURIComponent(chapter)}`,
   };
 
   async function loadJudul() {
