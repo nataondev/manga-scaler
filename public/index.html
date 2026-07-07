@@ -12,42 +12,37 @@
 
 <body>
     <div id="app">
-        <div id="content">
-            <div id="judul-list-container">
-                <table id="judul-list" class="manga-table">
-                    <thead>
-                        <tr>
-                            <th>No</th>
-                            <th>Judul Komik</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
+        <div id="judul-section">
+            <div class="search-bar">
+                <input type="text" id="search-input" placeholder="Cari judul..." autocomplete="off">
             </div>
+            <div id="manga-grid" class="manga-grid"></div>
+        </div>
 
-
-            <div id="chapter-section" class="d-none">
-                <h2>Chapter</h2>
-                <div class="chapter-navigation">
-                    <button id="prev-chapter" class="nav-btn" disabled>Prev (Shift + &larr;)</button>
-                    <select class="chapter-list" title="Chapter List"></select>
-                    <button id="next-chapter" class="nav-btn" disabled>Next (Shift + &rarr;)</button>
-                </div>
+        <div id="detail-section" class="d-none">
+            <div class="detail-header">
+                <button id="detail-back" class="nav-btn">← Kembali</button>
             </div>
+            <div class="detail-content" id="detail-content"></div>
+            <div class="detail-chapters" id="detail-chapters"></div>
+        </div>
 
-            <div id="image-section" class="d-none">
-                <div class="image-container" id="image-list"></div>
-
-                <div class="chapter-navigation chapter-float">
-                    <button id="prev-chapter-bottom" class="nav-btn" disabled>Prev (Shift + &larr;)</button>
-                    <select class="chapter-list-bottom" title="Chapter List"></select>
-                    <button id="next-chapter-bottom" class="nav-btn" disabled>Next (Shift + &rarr;)</button>
-                </div>
+        <div id="reader-section" class="d-none">
+            <div class="reader-topbar">
+                <h2 id="reader-title"></h2>
+            </div>
+            <div class="image-container" id="image-list"></div>
+            <button id="scroll-top" class="scroll-top-btn d-none">↑</button>
+            <div class="reader-bottombar">
+                <button id="back-to-list" class="nav-btn">← Kembali</button>
+                <select id="chapter-select" class="chapter-list" title="Chapter List"></select>
+                <button id="prev-chapter" class="nav-btn" disabled>Prev</button>
+                <span id="page-indicator">0 halaman</span>
+                <button id="next-chapter" class="nav-btn" disabled>Next</button>
             </div>
         </div>
     </div>
 
-    <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
     <script src="/public/script.js"></script>
 </body>
 

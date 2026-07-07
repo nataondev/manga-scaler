@@ -63,15 +63,77 @@ function handleRequest(req: Request): Response {
   }
 
   if (path === "/api/komik") {
-    const judulList = readdirSync(komikPath).filter((dir) => {
+    const dirs = readdirSync(komikPath).filter((dir) => {
       return statSync(join(komikPath, dir)).isDirectory();
     });
+    const list = dirs.map((slug) => {
+      let title = slug;
+      try {
+        const meta = JSON.parse(readFileSync(join(komikPath, slug, "metadata.json"), "utf-8"));
+        title = meta.title || meta.alternativeName || slug;
+      } catch {}
+      return { slug, title };
+    });
     return withCORS(
-      new Response(JSON.stringify(judulList), {
+      new Response(JSON.stringify(list), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })
     );
+  }
+
+  if (path === "/api/cover") {
+    const judul = url.searchParams.get("judul");
+    if (!judul) {
+      return withCORS(new Response("Judul not specified", { status: 400 }));
+    }
+    const judulPath = join(komikPath, judul);
+    try {
+      // Cek cover file khusus dulu
+      const coverFiles = readdirSync(judulPath)
+        .filter((f) => f.match(/^cover\.(png|jpg|jpeg|gif|webp)$/));
+      if (coverFiles.length > 0) {
+        const file = Bun.file(join(judulPath, coverFiles[0]));
+        return withCORS(new Response(file, { status: 200 }));
+      }
+      // Fallback: halaman pertama chapter pertama
+      const chapters = readdirSync(judulPath)
+        .filter((dir) => statSync(join(judulPath, dir)).isDirectory())
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      for (const chapter of chapters) {
+        const chapterPath = join(judulPath, chapter);
+        const images = readdirSync(chapterPath)
+          .filter((f) => f.match(/\.(png|jpg|jpeg|gif|webp)$/))
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        if (images.length > 0) {
+          const firstImage = join(chapterPath, images[0]);
+          const file = Bun.file(firstImage);
+          return withCORS(new Response(file, { status: 200 }));
+        }
+      }
+      return withCORS(new Response("No cover found", { status: 404 }));
+    } catch {
+      return withCORS(new Response("Judul not found", { status: 404 }));
+    }
+  }
+
+  if (path === "/api/metadata") {
+    const judul = url.searchParams.get("judul");
+    if (!judul) {
+      return withCORS(new Response("Judul not specified", { status: 400 }));
+    }
+    try {
+      const metaPath = join(komikPath, judul, "metadata.json");
+      const meta = readFileSync(metaPath, "utf-8");
+      return withCORS(
+        new Response(meta, {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+    } catch {
+      return withCORS(new Response("Metadata not found", { status: 404 }));
+    }
   }
 
   if (path.startsWith("/api/komik")) {

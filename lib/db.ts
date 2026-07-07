@@ -63,7 +63,7 @@ export function upsertComic(title: string, url: string, source: string, slug: st
   const d = getDb();
   const existing = d.query("SELECT id FROM comics WHERE url = ?").get(url) as any;
   if (existing) {
-    d.run("UPDATE comics SET last_accessed = datetime('now') WHERE id = ?", [existing.id]);
+    d.run("UPDATE comics SET title = ?, last_accessed = datetime('now') WHERE id = ?", [title, existing.id]);
     return existing.id;
   }
   const r = d.run("INSERT INTO comics (title, slug, url, source) VALUES (?, ?, ?, ?)", [title, slug, url, source]);

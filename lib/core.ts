@@ -46,9 +46,26 @@ export interface SiteScraper {
   referer: string;
   match(url: string): boolean;
   getComicTitle(url: string): Promise<string>;
+  getMetadata?(url: string): Promise<ComicMetadata>;
   listChapters(url: string): Promise<ChapterEntry[]>;
   scrapeImages(chapterUrl: string): Promise<ImageData[]>;
   parseChapter(url: string): string;
+}
+
+export interface ComicMetadata {
+  title?: string;
+  alternativeName?: string;
+  author?: string[];
+  artist?: string[];
+  genre?: string[];
+  theme?: string[];
+  status?: string;
+  type?: string;
+  rating?: string;
+  readingDirection?: string;
+  totalViews?: string;
+  summary?: string;
+  coverUrl?: string;
 }
 
 export { getComicHistory, getDownloadedChapters };
@@ -165,6 +182,36 @@ export class ImageProcessor {
 export function resolveComic(title: string, url: string, source: string) {
   const slug = slugify(title);
   return { id: upsertComic(title, url, source, slug), slug };
+}
+
+export function saveMetadata(slug: string, metadata: ComicMetadata, referer?: string): void {
+  const folder = path.join(CONFIG.OUTPUT_DIR, slug);
+  utils.ensureFolderExists(folder);
+
+  if (metadata.coverUrl) {
+    downloadCover(metadata.coverUrl, folder, referer);
+  }
+
+  const file = path.join(folder, "metadata.json");
+  const cleaned: any = {};
+  for (const [k, v] of Object.entries(metadata)) {
+    if (v !== undefined && (Array.isArray(v) ? v.length > 0 : v !== "")) {
+      cleaned[k] = v;
+    }
+  }
+  fs.writeFileSync(file, JSON.stringify(cleaned, null, 2));
+}
+
+async function downloadCover(coverUrl: string, folder: string, referer?: string) {
+  try {
+    const res = await axios.get(coverUrl, {
+      responseType: "arraybuffer",
+      timeout: 15000,
+      headers: referer ? { Referer: referer } : {},
+    });
+    const ext = coverUrl.match(/\.(jpg|jpeg|png|gif|webp)/i)?.[1] || "jpg";
+    fs.writeFileSync(path.join(folder, `cover.${ext}`), Buffer.from(res.data));
+  } catch {}
 }
 
 export function resolveChapter(comicId: number, chapterNum: string, chapterUrl: string, totalImages: number) {

@@ -1,200 +1,240 @@
-// Constants
-const SELECTORS = {
-  judulList: "#judul-list",
-  chapterList: ".chapter-list",
-  chapterListBottom: ".chapter-list-bottom",
-  imageList: "#image-list",
-  prevChapter: "#prev-chapter",
-  nextChapter: "#next-chapter",
-  prevChapterBottom: "#prev-chapter-bottom",
-  nextChapterBottom: "#next-chapter-bottom",
-  chapterSection: "#chapter-section",
-  imageSection: "#image-section",
+const baseUrl = new URL(window.location.href).origin;
+
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+
+const api = {
+  komik: () => fetch(`${baseUrl}/api/komik`).then(r => r.json()),
+  cover: (j) => `${baseUrl}/api/cover?judul=${encodeURIComponent(j)}`,
+  metadata: (j) => fetch(`${baseUrl}/api/metadata?judul=${encodeURIComponent(j)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+  chapters: (j) => fetch(`${baseUrl}/api/komik/${encodeURIComponent(j)}`).then(r => r.json()),
+  images: (j, c) => fetch(`${baseUrl}/api/komik/${encodeURIComponent(j)}/${encodeURIComponent(c)}`).then(r => r.json()),
 };
 
-const STORAGE_KEYS = {
-  currentJudul: "currentJudul",
-  currentChapter: "currentChapter",
+const store = {
+  get(k) { return localStorage.getItem(k); },
+  set(k, v) { localStorage.setItem(k, v); },
+  del(k) { localStorage.removeItem(k); },
 };
 
-const KEYBOARD = {
-  RIGHT_ARROW: 39,
-  LEFT_ARROW: 37,
-};
+let currentJudul = store.get('currentJudul');
+let currentChapter = store.get('currentChapter');
+let chapters = [];
 
-$(document).ready(function () {
-  // Cache DOM elements
-  const $judulList = $(SELECTORS.judulList);
-  const $chapterList = $(SELECTORS.chapterList);
-  const $chapterListBottom = $(SELECTORS.chapterListBottom);
-  const $imageList = $(SELECTORS.imageList);
-  const $chapterSection = $(SELECTORS.chapterSection);
-  const $imageSection = $(SELECTORS.imageSection);
+// === Grid manga ===
+async function loadJudul() {
+  const data = await api.komik();
+  const grid = $('#manga-grid');
+  grid.innerHTML = data.map(({ slug, title }) => {
+    const last = store.get(`currentChapter_${slug}`);
+    return `
+    <div class="manga-card" data-judul="${slug}">
+      <img src="${api.cover(slug)}" alt="${title}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 160 240%22><rect fill=%22%23333%22 width=%22160%22 height=%22240%22/><text fill=%22%23666%22 x=%2280%22 y=%22120%22 text-anchor=%22middle%22 font-size=%2214%22>No Cover</text></svg>'">
+      <div class="manga-title">${title}</div>
+      ${last ? `<div class="manga-last">${last}</div>` : ''}
+    </div>
+  `;
+  }).join('');
+}
 
-  // Get base URL
-  const baseUrl = new URL(window.location.href).origin;
-
-  // API endpoints
-  const API = {
-    getKomik: () => `${baseUrl}/api/komik`,
-    getChapters: (judul) => `${baseUrl}/api/komik/${encodeURIComponent(judul)}`,
-    getImages: (judul, chapter) => `${baseUrl}/api/komik/${encodeURIComponent(judul)}/${encodeURIComponent(chapter)}`,
-  };
-
-  async function loadJudul() {
-    try {
-      const data = await $.get(API.getKomik());
-      const judulTableBody = $judulList.find("tbody");
-      judulTableBody.empty();
-
-      const rows = data
-        .map(
-          (judul, index) => `
-        <tr data-judul="${judul}">
-          <td>${index + 1}</td>
-          <td>${judul}</td>
-        </tr>
-      `
-        )
-        .join("");
-
-      judulTableBody.html(rows);
-
-      const currentJudul = localStorage.getItem(STORAGE_KEYS.currentJudul);
-      if (currentJudul) {
-        loadChapter(currentJudul);
-      }
-    } catch (error) {
-      console.error("Error loading judul:", error);
-    }
-  }
-
-  async function loadChapter(judul) {
-    try {
-      const data = await $.get(API.getChapters(judul));
-
-      const options = data
-        .map(
-          (chapter) =>
-            `<option value="${chapter}" data-judul="${judul}">${chapter}</option>`
-        )
-        .join("");
-
-      $chapterList.html(options);
-      $chapterListBottom.html(options);
-
-      const currentChapter = localStorage.getItem(STORAGE_KEYS.currentChapter);
-      const initialChapter =
-        currentChapter && data.includes(currentChapter)
-          ? currentChapter
-          : data[0];
-
-      $chapterList.val(initialChapter);
-      $chapterListBottom.val(initialChapter);
-
-      updateNavigationButtons(data, initialChapter);
-      loadImages(judul, initialChapter);
-
-      $chapterSection.removeClass("d-none");
-    } catch (error) {
-      console.error("Error loading chapters:", error);
-    }
-  }
-
-  async function loadImages(judul, chapter) {
-    try {
-      const data = await $.get(API.getImages(judul, chapter));
-
-      const images = data
-        .map(
-          (imageUrl) =>
-            `<img src="${baseUrl}${imageUrl}" alt="Manga Page" loading="lazy">`
-        )
-        .join("");
-
-      $imageList.html(images);
-      $imageSection.removeClass("d-none");
-
-      localStorage.setItem(STORAGE_KEYS.currentJudul, judul);
-      localStorage.setItem(STORAGE_KEYS.currentChapter, chapter);
-    } catch (error) {
-      console.error("Error loading images:", error);
-    }
-  }
-
-  function updateNavigationButtons(chapters, currentChapter) {
-    const currentIndex = chapters.indexOf(currentChapter);
-    const isFirstChapter = currentIndex === 0;
-    const isLastChapter = currentIndex === chapters.length - 1;
-
-    $(SELECTORS.prevChapter).prop("disabled", isFirstChapter);
-    $(SELECTORS.nextChapter).prop("disabled", isLastChapter);
-    $(SELECTORS.prevChapterBottom).prop("disabled", isFirstChapter);
-    $(SELECTORS.nextChapterBottom).prop("disabled", isLastChapter);
-  }
-
-  function navigateChapter(direction) {
-    const chapters = $chapterList
-      .find("option")
-      .map((_, el) => $(el).val())
-      .get();
-    const currentChapter = $chapterList.val();
-    const currentIndex = chapters.indexOf(currentChapter);
-    const newIndex = currentIndex + direction;
-
-    if (newIndex >= 0 && newIndex < chapters.length) {
-      const newChapter = chapters[newIndex];
-      $chapterList.val(newChapter).trigger("change");
-      $chapterListBottom.val(newChapter);
-      updateNavigationButtons(chapters, newChapter);
-    }
-  }
-
-  // Event Handlers
-  $judulList.on("click", "tr", function () {
-    const judul = $(this).data("judul");
-    const currentJudul = localStorage.getItem(STORAGE_KEYS.currentJudul);
-
-    if (currentJudul !== judul) {
-      localStorage.removeItem(STORAGE_KEYS.currentChapter);
-    }
-
-    loadChapter(judul);
+$('#search-input').addEventListener('input', (e) => {
+  const q = e.target.value.toLowerCase();
+  $$('.manga-card').forEach(card => {
+    card.style.display = card.dataset.judul.toLowerCase().includes(q) ? '' : 'none';
   });
+});
 
-  $chapterList.add($chapterListBottom).on("change", function () {
-    const chapter = $(this).val();
-    const judul = localStorage.getItem(STORAGE_KEYS.currentJudul);
-    const chapters = $chapterList
-      .find("option")
-      .map((_, el) => $(el).val())
-      .get();
-
-    $chapterList.val(chapter);
-    $chapterListBottom.val(chapter);
-    updateNavigationButtons(chapters, chapter);
-    loadImages(judul, chapter);
+function showSection(id) {
+  ['judul-section', 'detail-section', 'reader-section'].forEach(s => {
+    $(`#${s}`).classList.toggle('d-none', s !== id);
   });
+}
 
-  // Navigation buttons
-  $(SELECTORS.prevChapter)
-    .add(SELECTORS.prevChapterBottom)
-    .on("click", () => navigateChapter(-1));
-  $(SELECTORS.nextChapter)
-    .add(SELECTORS.nextChapterBottom)
-    .on("click", () => navigateChapter(1));
+// Grid → Detail
+$('#manga-grid').addEventListener('click', (e) => {
+  const card = e.target.closest('.manga-card');
+  if (!card) return;
+  openDetail(card.dataset.judul);
+});
 
-  // Keyboard navigation
-  $(document).on("keydown", function (e) {
-    if (!e.shiftKey) return;
-
-    if (e.keyCode === KEYBOARD.RIGHT_ARROW) {
-      navigateChapter(1);
-    } else if (e.keyCode === KEYBOARD.LEFT_ARROW) {
-      navigateChapter(-1);
-    }
-  });
-
-  // Initialize
+// Detail → Grid
+$('#detail-back').addEventListener('click', () => {
+  showSection('judul-section');
   loadJudul();
 });
+
+// === Detail Page ===
+async function openDetail(judul) {
+  currentJudul = judul;
+  showSection('detail-section');
+
+  const [meta, chaps] = await Promise.all([
+    api.metadata(judul),
+    api.chapters(judul),
+  ]);
+  chapters = chaps;
+
+  const lastChapter = store.get(`currentChapter_${judul}`);
+  const displayTitle = meta?.alternativeName || meta?.title || judul;
+
+  let html = `
+    <div class="detail-cover">
+      <img src="${api.cover(judul)}" alt="${displayTitle}">
+    </div>
+    <div class="detail-info">
+      <h2>${displayTitle}</h2>`;
+
+  if (meta) {
+    const fields = [
+      ['Judul Asli', meta.alternativeName ? meta.title : null],
+      ['Author', meta.author?.join(', ')],
+      ['Artist', meta.artist?.join(', ')],
+      ['Status', meta.status],
+      ['Tipe', meta.type],
+      ['Tema', meta.theme?.join(', ')],
+      ['Rating', meta.rating],
+      ['Cara Baca', meta.readingDirection],
+      ['Pembaca', meta.totalViews],
+    ].filter(([, v]) => v);
+
+    fields.forEach(([label, value]) => {
+      const isTags = ['Genre', 'Tema'].includes(label) && meta[label.toLowerCase()];
+      if (isTags) {
+        const tags = meta[label.toLowerCase()].map(t => `<span class="meta-tag">${t}</span>`).join('');
+        html += `<div class="meta-row"><span class="meta-label">${label}:</span><span class="meta-value meta-tags">${tags}</span></div>`;
+      } else {
+        html += `<div class="meta-row"><span class="meta-label">${label}:</span><span class="meta-value">${value}</span></div>`;
+      }
+    });
+
+    if (meta.genre?.length) {
+      const tags = meta.genre.map(g => `<span class="meta-tag">${g}</span>`).join('');
+      html += `<div class="meta-row"><span class="meta-label">Genre:</span><span class="meta-value meta-tags">${tags}</span></div>`;
+    }
+
+    if (meta.summary) {
+      html += `<div class="summary">${meta.summary}</div>`;
+    }
+  }
+
+  html += `</div>`;
+  $('#detail-content').innerHTML = html;
+
+  // Chapter grid
+  const chapterHtml = chapters.map(ch => `
+    <div class="ch-item${ch === lastChapter ? ' current' : ''}" data-chapter="${ch}">${ch}</div>
+  `).join('');
+
+  $('#detail-chapters').innerHTML = `
+    <h3>${chapters.length} Chapter</h3>
+    <div class="ch-grid">${chapterHtml}</div>
+  `;
+
+  window.scrollTo(0, 0);
+}
+
+// Detail → Reader (click chapter)
+$('#detail-chapters').addEventListener('click', (e) => {
+  const item = e.target.closest('.ch-item');
+  if (!item) return;
+  const ch = item.dataset.chapter;
+  currentChapter = ch;
+  store.set('currentChapter', ch);
+  openReader(currentJudul);
+});
+
+// === Reader ===
+async function openReader(judul) {
+  const chapter = currentChapter || chapters[0];
+  currentChapter = chapter;
+  store.set('currentChapter', chapter);
+
+  $('#reader-title').textContent = judul;
+  populateChapterSelect(chapter);
+  await loadImages(judul, chapter);
+  updateNav();
+
+  showSection('reader-section');
+}
+
+$('#back-to-list').addEventListener('click', () => {
+  showSection('judul-section');
+  loadJudul();
+});
+
+function populateChapterSelect(selected) {
+  const html = chapters.map(c => `<option value="${c}" ${c === selected ? 'selected' : ''}>${c}</option>`).join('');
+  $('#chapter-select').innerHTML = html;
+}
+
+$('#chapter-select').addEventListener('change', async (e) => {
+  currentChapter = e.target.value;
+  store.set('currentChapter', currentChapter);
+  await loadImages(currentJudul, currentChapter);
+  updateNav();
+  window.scrollTo(0, 0);
+});
+
+async function loadImages(judul, chapter) {
+  const data = await api.images(judul, chapter);
+  $('#image-list').innerHTML = data.map(url =>
+    `<img src="${baseUrl}${url}" alt="page" loading="lazy" data-page>`
+  ).join('');
+
+  const savedScroll = store.get(`scroll_${judul}_${chapter}`);
+  window.scrollTo(0, savedScroll ? parseInt(savedScroll) : 0);
+
+  store.set('currentJudul', judul);
+  store.set('currentChapter', chapter);
+  store.set(`currentChapter_${judul}`, chapter);
+  updatePageIndicator();
+}
+
+function updatePageIndicator() {
+  $('#page-indicator').textContent = `${$$('#image-list img').length} halaman`;
+}
+
+function updateNav() {
+  const idx = chapters.indexOf(currentChapter);
+  $('#prev-chapter').disabled = idx <= 0;
+  $('#next-chapter').disabled = idx >= chapters.length - 1;
+}
+
+function navigate(direction) {
+  const idx = chapters.indexOf(currentChapter);
+  const newIdx = idx + direction;
+  if (newIdx < 0 || newIdx >= chapters.length) return;
+  currentChapter = chapters[newIdx];
+  store.set('currentChapter', currentChapter);
+  $('#chapter-select').value = currentChapter;
+  loadImages(currentJudul, currentChapter);
+  updateNav();
+  window.scrollTo(0, 0);
+}
+
+$('#prev-chapter').addEventListener('click', () => navigate(-1));
+$('#next-chapter').addEventListener('click', () => navigate(1));
+
+document.addEventListener('keydown', (e) => {
+  if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'SELECT') return;
+  if (e.key === 'ArrowRight') { e.preventDefault(); navigate(1); }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); navigate(-1); }
+});
+
+let scrollTimer;
+const scrollTopBtn = $('#scroll-top');
+window.addEventListener('scroll', () => {
+  clearTimeout(scrollTimer);
+  scrollTimer = setTimeout(() => {
+    if (currentJudul && currentChapter) {
+      store.set(`scroll_${currentJudul}_${currentChapter}`, window.scrollY);
+    }
+  }, 300);
+  scrollTopBtn.classList.toggle('d-none', window.scrollY <= 600);
+});
+
+scrollTopBtn.addEventListener('click', () => {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+
+loadJudul();

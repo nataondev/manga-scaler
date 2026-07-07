@@ -20,6 +20,7 @@ import {
   resolveChapter,
   isChapterAlreadyDone,
   finishChapter,
+  saveMetadata,
 } from "./lib/core";
 import { komikuScraper } from "./lib/sites/komiku";
 import { mangatownScraper } from "./lib/sites/mangatown";
@@ -183,6 +184,13 @@ class ComicProcessor {
     const { id: comicId, slug } = resolveComic(comicTitle, comicUrl, scraper.name);
     const chapters = await scraper.listChapters(comicUrl);
     fetchS.stop(`📚 ${comicTitle} (${scraper.name})`);
+
+    if (scraper.getMetadata) {
+      fetchS.start("Fetching metadata...");
+      const meta = await scraper.getMetadata(comicUrl);
+      saveMetadata(slug, meta, scraper.referer);
+      fetchS.stop(`✅ Metadata saved`);
+    }
 
     if (!chapters.length) { cancel("No chapters found."); process.exit(1); }
 

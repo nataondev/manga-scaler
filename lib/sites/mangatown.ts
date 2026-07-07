@@ -1,6 +1,6 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
-import type { SiteScraper, ImageData, ChapterEntry } from "../core";
+import type { SiteScraper, ImageData, ChapterEntry, ComicMetadata } from "../core";
 
 const BASE = "https://www.mangatown.com";
 
@@ -10,6 +10,47 @@ export const mangatownScraper: SiteScraper = {
 
   match(url: string) {
     return url.includes("mangatown.com");
+  },
+
+  async getMetadata(url: string): Promise<ComicMetadata> {
+    try {
+      const { data } = await axios.get(url);
+      const $ = cheerio.load(data);
+
+      const coverUrl = $("img.cover, .detail_info img").first().attr("src") || undefined;
+      const title = $("h1.title-top").text().trim() || undefined;
+      const summary = $("#show[style*='display: inline']").text().trim() || undefined;
+
+      // Parse all <li> in detail_info by matching <b> label text
+      const meta: Record<string, string | string[]> = {};
+      $(".detail_info li").each((_, li) => {
+        const b = $(li).find("b").first();
+        if (!b.length) return;
+        const label = b.text().trim().replace(/:$/, "");
+        b.remove();
+        const aLinks = $(li).find("a").map((_, a) => $(a).text().trim()).get().filter(Boolean);
+        if (aLinks.length) {
+          meta[label] = aLinks;
+        } else {
+          const val = $(li).text().trim();
+          if (val) meta[label] = val;
+        }
+      });
+
+      return {
+        ...(title && { title }),
+        ...(meta["Alternative Name"] && { alternativeName: meta["Alternative Name"] as string }),
+        ...(meta["Author(s)"] || meta["Author"] ? { author: (meta["Author(s)"] || meta["Author"]) as string[] } : {}),
+        ...(meta["Artist(s)"] || meta["Artist"] ? { artist: (meta["Artist(s)"] || meta["Artist"]) as string[] } : {}),
+        ...(meta["Genre(s)"] || meta["Genre"] ? { genre: (meta["Genre(s)"] || meta["Genre"]) as string[] } : {}),
+        ...(meta["Status(s)"] || meta["Status"] ? { status: (meta["Status(s)"] || meta["Status"]) as string } : {}),
+        ...(meta["Type"] && { type: meta["Type"] as string }),
+        ...(summary && { summary }),
+        ...(coverUrl && { coverUrl }),
+      };
+    } catch {
+      return {};
+    }
   },
 
   async getComicTitle(url: string): Promise<string> {
