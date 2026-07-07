@@ -46,10 +46,9 @@ function initSchema() {
       idx INTEGER NOT NULL,
       src TEXT NOT NULL,
       status TEXT DEFAULT 'pending',
-      raw_filename TEXT,
-      scaled_filename TEXT,
+      filename TEXT,
       raw_size INTEGER,
-      scaled_size INTEGER,
+      output_size INTEGER,
       error TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
@@ -130,15 +129,14 @@ export function upsertImage(chapterId: number, idx: number, src: string) {
 export function markImageDone(
   chapterId: number,
   idx: number,
-  rawFilename: string,
-  scaledFilename: string,
+  filename: string,
   rawSize: number,
-  scaledSize: number
+  outputSize: number
 ) {
   getDb().run(
-    `UPDATE images SET status = 'complete', raw_filename = ?, scaled_filename = ?, raw_size = ?, scaled_size = ?
+    `UPDATE images SET status = 'complete', filename = ?, raw_size = ?, output_size = ?
      WHERE chapter_id = ? AND idx = ?`,
-    [rawFilename, scaledFilename, rawSize, scaledSize, chapterId, idx]
+    [filename, rawSize, outputSize, chapterId, idx]
   );
 }
 
@@ -149,7 +147,7 @@ export function markImageSkip(
   size: number
 ) {
   getDb().run(
-    `UPDATE images SET status = 'skip', scaled_filename = ?, raw_size = ?
+    `UPDATE images SET status = 'skip', filename = ?, output_size = ?
      WHERE chapter_id = ? AND idx = ?`,
     [filename, size, chapterId, idx]
   );

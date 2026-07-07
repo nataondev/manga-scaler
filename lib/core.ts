@@ -2,18 +2,17 @@ import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
 import axios from "axios";
+import sharp from "sharp";
 import dotenv from "dotenv";
 import {
   upsertComic,
   upsertChapter,
   upsertImage,
   markImageDone,
-  markImageSkip,
   markImageFailed,
   markChapterComplete,
   isChapterComplete,
   getDownloadedChapters,
-  getChapterImages,
   getComicHistory,
 } from "./db";
 
@@ -26,8 +25,8 @@ export function slugify(text: string): string {
 export const CONFIG = {
   WAIFU2X_PATH: process.env.WAIFU2X_PATH || "~/Repos/tools/waifu2x/waifu2x-ncnn-vulkan",
   OUTPUT_DIR: process.env.OUTPUT_DIR || path.join(import.meta.dir, "..", "komik"),
-  MIN_IMAGE_SIZE: parseInt(process.env.MIN_IMAGE_SIZE || "900"),
-  MAX_IMAGE_SIZE: parseInt(process.env.MAX_IMAGE_SIZE || "1024"),
+  MIN_IMAGE_WIDTH: parseInt(process.env.MIN_IMAGE_WIDTH || "900"),
+  WEBP_QUALITY: parseInt(process.env.WEBP_QUALITY || "85"),
   NOISE_REDUCTION: process.env.NOISE_REDUCTION || "2",
   SCALE_FACTOR: process.env.SCALE_FACTOR || "2",
 } as const;
@@ -52,7 +51,6 @@ export interface SiteScraper {
   parseChapter(url: string): string;
 }
 
-// Re-export DB functions
 export { getComicHistory, getDownloadedChapters };
 
 export const utils = {
@@ -72,98 +70,98 @@ export const utils = {
     if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
   },
 
-  getImageSavePath(comicTitle: string, chapter: string, fileName: string): string {
-    const folderPath = path.join(CONFIG.OUTPUT_DIR, comicTitle, chapter);
+  getImageSavePath(slug: string, chapter: string, fileName: string): string {
+    const folderPath = path.join(CONFIG.OUTPUT_DIR, slug, chapter);
     this.ensureFolderExists(folderPath);
     return path.join(folderPath, fileName);
   },
 
-  getNextChapterIndex(chapters: string[], parser: (url: string) => string, lastChapter: string): number {
+  getNextChapterIndex(
+    chapters: { url: string; label: string }[],
+    parser: (url: string) => string,
+    lastChapter: string
+  ): number {
     const lastClean = lastChapter.replace("-", ".");
     for (let i = 0; i < chapters.length; i++) {
-      const current = parser(chapters[i]).replace("-", ".");
+      const current = parser(chapters[i].url).replace("-", ".");
       if (parseFloat(current) > parseFloat(lastClean)) return i;
     }
     return -1;
   },
-};
 
-export async function downloadImage(url: string, outputPath: string, referer?: string): Promise<void> {
-  await utils.retry(async () => {
-    const response = await axios({
-      url,
-      method: "GET",
-      responseType: "stream",
-      headers: referer ? { Referer: referer } : {},
-    });
-    await new Promise((resolve, reject) => {
-      response.data
-        .pipe(fs.createWriteStream(outputPath))
-        .on("finish", resolve)
-        .on("error", reject);
-    });
-  });
-}
-
-export class ImageProcessor {
-  static scaleImage(inputPath: string, outputPath: string): Promise<void> {
+  async waifu2x(inputPath: string, outputPath: string): Promise<void> {
+    const cmd = `${CONFIG.WAIFU2X_PATH} -i "${inputPath}" -o "${outputPath}" -n ${CONFIG.NOISE_REDUCTION} -s ${CONFIG.SCALE_FACTOR}`;
     return new Promise((resolve, reject) => {
-      const cmd = `${CONFIG.WAIFU2X_PATH} -i "${inputPath}" -o "${outputPath}" -n ${CONFIG.NOISE_REDUCTION} -s ${CONFIG.SCALE_FACTOR}`;
       exec(cmd, (error) => (error ? reject(error) : resolve()));
     });
-  }
+  },
+};
 
+export class ImageProcessor {
   static async processImage(
     src: string,
     index: number,
-    comicTitle: string,
+    slug: string,
     chapter: string,
     chapterId: number,
     referer: string,
     message: (msg: string) => void
   ): Promise<boolean> {
-    const ext = src.match(/\.(webp)$/i) ? "webp" : "jpg";
-    const rawFileName = `raw_${index + 1}.${ext}`;
-    const scaledFileName = `${index + 1}.png`;
-    const skipFileName = `${index + 1}_skip.png`;
-
-    const rawPath = utils.getImageSavePath(comicTitle, chapter, rawFileName);
-    const scaledPath = utils.getImageSavePath(comicTitle, chapter, scaledFileName);
-    const skipPath = utils.getImageSavePath(comicTitle, chapter, skipFileName);
+    const rawFile = `raw_${index + 1}.tmp`;
+    const rawPath = utils.getImageSavePath(slug, chapter, rawFile);
+    const outputFile = `${index + 1}.webp`;
+    const outputPath = utils.getImageSavePath(slug, chapter, outputFile);
 
     try {
       upsertImage(chapterId, index + 1, src);
 
-      message(`Downloading image ${index + 1}...`);
-      await downloadImage(src, rawPath, referer);
+      message(`Downloading ${index + 1}...`);
+      const buf = await utils.retry(async () => {
+        const res = await axios.get(src, {
+          responseType: "arraybuffer",
+          timeout: 30000,
+          headers: { Referer: referer },
+        });
+        return Buffer.from(res.data);
+      });
 
-      const rawSize = fs.statSync(rawPath).size;
-      if (rawSize > CONFIG.MIN_IMAGE_SIZE * 1024) {
-        message(`Image ${index + 1} is large enough, skipping...`);
-        fs.renameSync(rawPath, skipPath);
-        markImageSkip(chapterId, index + 1, skipFileName, rawSize);
-      } else {
-        message(`Scaling image ${index + 1}...`);
-        await this.scaleImage(rawPath, scaledPath);
-        const scaledSize = fs.statSync(scaledPath).size;
-        if (scaledSize < CONFIG.MAX_IMAGE_SIZE * 1024) {
-          message(`Retrying scaling...`);
-          await this.scaleImage(rawPath, scaledPath);
-        }
+      fs.writeFileSync(rawPath, buf);
+      const rawSize = buf.length;
+      const meta = await sharp(buf).metadata();
+      const origWidth = meta.width || 0;
+
+      if (origWidth >= CONFIG.MIN_IMAGE_WIDTH) {
+        message(`${index + 1} (${origWidth}px), direct WebP...`);
         fs.unlinkSync(rawPath);
-        markImageDone(chapterId, index + 1, rawFileName, scaledFileName, rawSize, fs.statSync(scaledPath).size);
+        await sharp(buf)
+          .webp({ quality: CONFIG.WEBP_QUALITY })
+          .toFile(outputPath);
+      } else {
+        message(`${index + 1} AI upscale (${origWidth}px)...`);
+        const scaledPng = rawPath.replace(/\.tmp$/, ".png");
+        await utils.waifu2x(rawPath, scaledPng);
+        fs.unlinkSync(rawPath);
+
+        message(`${index + 1} WebP compress...`);
+        await sharp(scaledPng)
+          .webp({ quality: CONFIG.WEBP_QUALITY })
+          .toFile(outputPath);
+        fs.unlinkSync(scaledPng);
       }
+
+      const outputSize = fs.statSync(outputPath).size;
+      markImageDone(chapterId, index + 1, outputFile, rawSize, outputSize);
       return true;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`Error image ${index + 1}:`, msg);
+      try { if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath); } catch {}
       markImageFailed(chapterId, index + 1, msg);
       return false;
     }
   }
 }
 
-// Comic helper
 export function resolveComic(title: string, url: string, source: string) {
   const slug = slugify(title);
   return { id: upsertComic(title, url, source, slug), slug };
