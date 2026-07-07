@@ -179,4 +179,8 @@ komik/*
 
 # History
 history.txt
+history-berwarna.txt
+
+# Lock files (use bun.lockb only)
+package-lock.json
 

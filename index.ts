@@ -107,7 +107,7 @@ function handleRequest(req: Request): Response {
     const chapterPath = join(judulPath, chapter);
     try {
       const images = readdirSync(chapterPath)
-        .filter((file) => file.match(/\.(png|jpg|jpeg|gif)$/))
+        .filter((file) => file.match(/\.(png|jpg|jpeg|gif|webp)$/))
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
       const imagePaths = images.map(
         (file) =>
@@ -131,8 +131,13 @@ function handleRequest(req: Request): Response {
       return withCORS(new Response("File path not specified", { status: 400 }));
     }
 
+    const resolved = join(__dirname, filePath);
+    if (!resolved.startsWith(join(__dirname, komikPath))) {
+      return withCORS(new Response("Access denied", { status: 403 }));
+    }
+
     try {
-      const file = Bun.file(filePath);
+      const file = Bun.file(resolved);
       return withCORS(new Response(file, { status: 200 }));
     } catch {
       return withCORS(new Response("File not found", { status: 404 }));

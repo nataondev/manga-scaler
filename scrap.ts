@@ -3,13 +3,20 @@ import * as cheerio from "cheerio";
 import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
-import ora from "ora";
 import dotenv from "dotenv";
-import type { Ora } from "ora";
+import {
+  intro,
+  outro,
+  spinner,
+  select,
+  text,
+  cancel,
+  isCancel,
+  note,
+} from "@clack/prompts";
 
 dotenv.config();
 
-// Constants
 const CONFIG = {
   WAIFU2X_PATH:
     process.env.WAIFU2X_PATH || "~/Repos/tools/waifu2x/waifu2x-ncnn-vulkan",
@@ -23,7 +30,6 @@ const CONFIG = {
   MAX_HISTORY: 10,
 } as const;
 
-// Types
 interface ImageData {
   src: string;
   alt: string;
@@ -35,7 +41,6 @@ interface ComicHistory {
   lastAccessed: string;
 }
 
-// History Management
 class HistoryManager {
   private history: ComicHistory[] = [];
 
@@ -49,8 +54,7 @@ class HistoryManager {
         const data = fs.readFileSync(CONFIG.HISTORY_FILE, "utf8");
         this.history = JSON.parse(data);
       }
-    } catch (error) {
-      console.error("Error loading history:", error);
+    } catch {
       this.history = [];
     }
   }
@@ -61,24 +65,15 @@ class HistoryManager {
         CONFIG.HISTORY_FILE,
         JSON.stringify(this.history, null, 2)
       );
-    } catch (error) {
-      console.error("Error saving history:", error);
-    }
+    } catch {}
   }
 
   addToHistory(url: string, title: string): void {
     const existingIndex = this.history.findIndex((h) => h.url === url);
     const newEntry = { url, title, lastAccessed: new Date().toISOString() };
-
-    if (existingIndex !== -1) {
-      this.history.splice(existingIndex, 1);
-    }
-
+    if (existingIndex !== -1) this.history.splice(existingIndex, 1);
     this.history.unshift(newEntry);
-    if (this.history.length > CONFIG.MAX_HISTORY) {
-      this.history.pop();
-    }
-
+    if (this.history.length > CONFIG.MAX_HISTORY) this.history.pop();
     this.saveHistory();
   }
 
@@ -86,16 +81,12 @@ class HistoryManager {
     return this.history;
   }
 
-  showHistory(): void {
-    if (this.history.length === 0) {
-      console.log("No history found.");
-      return;
-    }
-
-    console.log("\nRecent Comics:");
-    this.history.forEach((entry, index) => {
-      console.log(`${index + 1}. ${entry.title} (${entry.url})`);
-    });
+  getHistoryOptions() {
+    return this.history.map((entry, index) => ({
+      value: entry.url,
+      label: `${index + 1}. ${entry.title}`,
+      hint: entry.url,
+    }));
   }
 
   getUrlByIndex(index: number): string | null {
@@ -103,12 +94,22 @@ class HistoryManager {
   }
 }
 
-// Utility Functions
 const utils = {
-  ensureFolderExists(folderPath: string): void {
-    if (!fs.existsSync(folderPath)) {
-      fs.mkdirSync(folderPath, { recursive: true });
+  async retry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await fn();
+      } catch {
+        if (i === retries - 1) throw new Error(`Failed after ${retries} attempts`);
+        await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+      }
     }
+    throw new Error("unreachable");
+  },
+
+  ensureFolderExists(folderPath: string): void {
+    if (!fs.existsSync(folderPath))
+      fs.mkdirSync(folderPath, { recursive: true });
   },
 
   parseChapter(url: string): string {
@@ -141,12 +142,10 @@ const utils = {
   getDownloadedChapters(comicTitle: string): string[] {
     const comicPath = path.join(CONFIG.OUTPUT_DIR, comicTitle);
     if (!fs.existsSync(comicPath)) return [];
-
     try {
       return fs
         .readdirSync(comicPath)
         .filter((folder) => {
-          // Pastikan ini adalah folder chapter yang valid
           const folderPath = path.join(comicPath, folder);
           return (
             fs.statSync(folderPath).isDirectory() &&
@@ -154,13 +153,11 @@ const utils = {
           );
         })
         .sort((a, b) => {
-          // Sort berdasarkan nomor chapter
           const numA = parseFloat(a.replace("-", ".")) || 0;
           const numB = parseFloat(b.replace("-", ".")) || 0;
           return numA - numB;
         });
-    } catch (error) {
-      console.error(`Error reading downloaded chapters: ${error}`);
+    } catch {
       return [];
     }
   },
@@ -169,37 +166,21 @@ const utils = {
     chapters: string[],
     lastDownloadedChapter: string
   ): number {
-    // Cari indeks chapter terakhir yang diunduh
-    const lastDownloadedChapterClean = lastDownloadedChapter.replace("-", ".");
-
+    const lastClean = lastDownloadedChapter.replace("-", ".");
     for (let i = 0; i < chapters.length; i++) {
-      const currentChapter = utils.parseChapter(chapters[i]);
-      const currentChapterClean = currentChapter.replace("-", ".");
-
-      // Jika menemukan chapter yang nomor chapter-nya lebih besar dari terakhir diunduh
-      if (
-        parseFloat(currentChapterClean) > parseFloat(lastDownloadedChapterClean)
-      ) {
-        return i;
-      }
+      const current = utils.parseChapter(chapters[i]).replace("-", ".");
+      if (parseFloat(current) > parseFloat(lastClean)) return i;
     }
-
-    // Jika tidak menemukan chapter berikutnya (misal sudah mengunduh yang terbaru)
     return -1;
-  },
-
-  formatChapterDisplay(chapter: string, isDownloaded: boolean): string {
-    return `${chapter}${isDownloaded ? " ✓" : ""}`;
   },
 };
 
-// API Functions
 const api = {
   async scrapeImages(url: string): Promise<ImageData[]> {
     try {
       const { data } = await axios.get(url);
       const $ = cheerio.load(data);
-      return $('img[itemprop="image"]')
+      return $("#Baca_Komik img.ww")
         .map((_, el) => ({
           src: $(el).attr("src") || "",
           alt: $(el).attr("alt") || "",
@@ -212,11 +193,12 @@ const api = {
   },
 
   async downloadImage(url: string, outputPath: string): Promise<void> {
-    try {
+    await utils.retry(async () => {
       const response = await axios({
         url,
         method: "GET",
         responseType: "stream",
+        headers: { Referer: "https://komiku.org/" },
       });
       await new Promise((resolve, reject) => {
         response.data
@@ -224,9 +206,7 @@ const api = {
           .on("finish", resolve)
           .on("error", reject);
       });
-    } catch (error) {
-      console.error(`Error downloading image ${url}:`, error);
-    }
+    });
   },
 
   async listChapters(comicUrl: string): Promise<string[]> {
@@ -238,8 +218,7 @@ const api = {
         .get()
         .map((href) => `${CONFIG.BASE_KOMIKU_URL}${href}`)
         .reverse();
-    } catch (error) {
-      console.error(`Error fetching chapters from ${comicUrl}:`, error);
+    } catch {
       return [];
     }
   },
@@ -252,14 +231,12 @@ const api = {
       return (
         title || comicUrl.split("manga/")[1]?.split("/")[0] || "unknown_comic"
       );
-    } catch (error) {
-      console.error(`Error fetching comic title: ${error}`);
+    } catch {
       return comicUrl.split("manga/")[1]?.split("/")[0] || "unknown_comic";
     }
   },
 };
 
-// Image Processing
 class ImageProcessor {
   static scaleImage(inputPath: string, outputPath: string): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -273,57 +250,42 @@ class ImageProcessor {
     index: number,
     comicTitle: string,
     chapter: string,
-    spinner: Ora
-  ): Promise<void> {
+    s: ReturnType<typeof spinner>
+  ): Promise<boolean> {
     const rawFileName = `raw_image_${index + 1}.jpg`;
     const scaledFileName = `scaled_image_${index + 1}.png`;
     const skipScaledFileName = `scaled_image_${index + 1}_skip_.png`;
 
-    const rawFilePath = utils.getImageSavePath(
-      comicTitle,
-      chapter,
-      rawFileName
-    );
-    const scaledFilePath = utils.getImageSavePath(
-      comicTitle,
-      chapter,
-      scaledFileName
-    );
-    const skipScaledFilePath = utils.getImageSavePath(
-      comicTitle,
-      chapter,
-      skipScaledFileName
-    );
+    const rawFilePath = utils.getImageSavePath(comicTitle, chapter, rawFileName);
+    const scaledFilePath = utils.getImageSavePath(comicTitle, chapter, scaledFileName);
+    const skipScaledFilePath = utils.getImageSavePath(comicTitle, chapter, skipScaledFileName);
 
     try {
-      spinner.text = `Downloading image ${index + 1}...`;
+      s.message(`Downloading image ${index + 1}...`);
       await api.downloadImage(src, rawFilePath);
 
       const rawSize = fs.statSync(rawFilePath).size;
       if (rawSize > CONFIG.MIN_IMAGE_SIZE * 1024) {
-        spinner.text = `Image ${
-          index + 1
-        } is large enough, skipping scaling...`;
+        s.message(`Image ${index + 1} is large enough, skipping scaling...`);
         fs.renameSync(rawFilePath, skipScaledFilePath);
       } else {
-        spinner.text = `Scaling image ${index + 1}...`;
+        s.message(`Scaling image ${index + 1}...`);
         await this.scaleImage(rawFilePath, scaledFilePath);
-
         const scaledSize = fs.statSync(scaledFilePath).size;
         if (scaledSize < CONFIG.MAX_IMAGE_SIZE * 1024) {
-          spinner.text = `Retrying scaling for image ${index + 1}...`;
+          s.message(`Retrying scaling for image ${index + 1}...`);
           await this.scaleImage(rawFilePath, scaledFilePath);
         }
-
         fs.unlinkSync(rawFilePath);
       }
+      return true;
     } catch (error) {
       console.error(`Error processing image ${index + 1}:`, error);
+      return false;
     }
   }
 }
 
-// Comic Processor
 class ComicProcessor {
   private historyManager: HistoryManager;
 
@@ -333,31 +295,27 @@ class ComicProcessor {
 
   async processChapter(chapterUrl: string, comicTitle: string): Promise<void> {
     const chapter = utils.parseChapter(chapterUrl);
-    console.log(`\nProcessing Chapter: ${chapter} of ${comicTitle}`);
 
     const images = await api.scrapeImages(chapterUrl);
     if (!images.length) {
-      console.warn(`No images found for ${chapterUrl}`);
+      cancel(`No images found for chapter ${chapter}`);
       return;
     }
 
     const folderPath = path.join(CONFIG.OUTPUT_DIR, comicTitle, chapter);
     if (utils.areImagesComplete(folderPath, images.length)) {
-      console.log(`Images for Chapter ${chapter} are already downloaded.`);
+      note(`Chapter ${chapter} already downloaded.`, "⏭️");
       return;
     }
 
-    const spinner = ora(`Processing Chapter ${chapter}`).start();
+    const s = spinner();
+    s.start(`Processing Chapter ${chapter}`);
+    let failed = 0;
     for (const [index, { src }] of images.entries()) {
-      await ImageProcessor.processImage(
-        src,
-        index,
-        comicTitle,
-        chapter,
-        spinner
-      );
+      const ok = await ImageProcessor.processImage(src, index, comicTitle, chapter, s);
+      if (!ok) failed++;
     }
-    spinner.succeed(`Finished processing Chapter: ${chapter}`);
+    s.stop(`Chapter ${chapter}: ${images.length - failed}/${images.length} images`);
   }
 
   findChapterIndex(chapters: string[], targetChapter: string): number {
@@ -367,86 +325,33 @@ class ComicProcessor {
     );
   }
 
-  displayChaptersInfo(chapters: string[], comicTitle: string): void {
-    const downloadedChapters = utils.getDownloadedChapters(comicTitle);
-
-    if (downloadedChapters.length > 0) {
-      const lastTenChapters = downloadedChapters.slice(-10);
-      const lastChapter = downloadedChapters[downloadedChapters.length - 1];
-      const nextChapterIndex = utils.getNextChapterIndex(chapters, lastChapter);
-
-      console.log(`\n┌─────────────────────────────┐`);
-      console.log(`│ 💾 CHAPTER TERUNDUH (${downloadedChapters.length})     │`);
-      console.log(`└─────────────────────────────┘`);
-
-      if (lastTenChapters.length > 0) {
-        lastTenChapters.forEach((chapter) => {
-          console.log(`   • Chapter ${chapter} ✓`);
-        });
-
-        if (downloadedChapters.length > 10) {
-          console.log(
-            `   • ... dan ${downloadedChapters.length - 10} chapter lainnya`
-          );
-        }
-      }
-
-      // Tampilkan chapter terakhir yang diunduh dan chapter berikutnya
-      if (lastChapter) {
-        console.log(
-          `\n📌 Chapter terakhir yang diunduh: Chapter ${lastChapter}`
-        );
-
-        if (nextChapterIndex !== -1) {
-          const nextChapter = utils.parseChapter(chapters[nextChapterIndex]);
-          console.log(`📥 Chapter berikutnya tersedia: Chapter ${nextChapter}`);
-        } else {
-          console.log(`✅ Semua chapter sudah diunduh!`);
-        }
-      }
-    } else {
-      console.log(`\n❗ Belum ada chapter yang diunduh`);
-      console.log(`💡 Total chapter tersedia: ${chapters.length}`);
-      console.log(
-        `💡 Chapter pertama: Chapter ${utils.parseChapter(chapters[0])}`
-      );
-      console.log(
-        `💡 Chapter terakhir: Chapter ${utils.parseChapter(
-          chapters[chapters.length - 1]
-        )}`
-      );
-    }
-  }
-
   async start(): Promise<void> {
-    console.clear();
-    console.log(`
-┌───────────────────────────────────────────┐
-│                                           │
-│  KOMIKU SCRAP + WAIFU2X SCALE             │
-│  by @nataondev                            │
-│                                           │
-└───────────────────────────────────────────┘
-    `);
+    intro("KOMIKU SCRAP + WAIFU2X SCALE");
 
-    this.historyManager.showHistory();
-
-    const historyChoice = prompt(
-      "\nMasukkan nomor history atau paste URL baru: "
-    );
-    if (!historyChoice) {
-      console.error("Tidak ada input yang diberikan");
-      return;
+    const history = this.historyManager.getHistory();
+    if (history.length > 0) {
+      note(
+        history.map((h, i) => `${i + 1}. ${h.title}`).join("\n"),
+        "Recent Comics"
+      );
     }
 
-    let comicUrl = "";
+    let comicUrl: string;
+    const historyChoice = await text({
+      message: "Masukkan nomor history atau paste URL baru:",
+      placeholder: "https://komiku.org/manga/...",
+    });
+
+    if (isCancel(historyChoice)) {
+      cancel("Dibatalkan.");
+      process.exit(0);
+    }
+
     if (/^\d+$/.test(historyChoice)) {
-      const historyUrl = this.historyManager.getUrlByIndex(
-        parseInt(historyChoice)
-      );
+      const historyUrl = this.historyManager.getUrlByIndex(parseInt(historyChoice));
       if (!historyUrl) {
-        console.error("Indeks history tidak valid.");
-        return;
+        cancel("Indeks history tidak valid.");
+        process.exit(1);
       }
       comicUrl = historyUrl;
     } else {
@@ -454,118 +359,111 @@ class ComicProcessor {
     }
 
     if (!comicUrl.includes("https://")) {
-      console.error("URL komik tidak valid.");
-      return;
+      cancel("URL komik tidak valid.");
+      process.exit(1);
     }
 
-    console.log(`\n🔍 Mengambil informasi komik...`);
+    const fetchS = spinner();
+    fetchS.start("Mengambil informasi komik...");
     const comicTitle = await api.getComicTitle(comicUrl);
     this.historyManager.addToHistory(comicUrl, comicTitle);
+    fetchS.stop(`📚 ${comicTitle}`);
 
-    console.log(`\n📚 Judul Komik: ${comicTitle}`);
-    console.log(`🔄 Mengambil daftar chapter...`);
     const chapters = await api.listChapters(comicUrl);
-
     if (!chapters.length) {
-      console.error(`❌ Tidak ada chapter yang ditemukan untuk ${comicUrl}`);
-      return;
+      cancel("Tidak ada chapter ditemukan.");
+      process.exit(1);
     }
 
-    console.log(`\n✅ Ditemukan ${chapters.length} chapter total`);
-    this.displayChaptersInfo(chapters, comicTitle);
-
-    // Cek apakah ada chapter terakhir yang diunduh
     const downloadedChapters = utils.getDownloadedChapters(comicTitle);
-    const lastDownloadedChapter =
-      downloadedChapters.length > 0
-        ? downloadedChapters[downloadedChapters.length - 1]
-        : null;
+    const lastDownloadedChapter = downloadedChapters.length > 0
+      ? downloadedChapters[downloadedChapters.length - 1]
+      : null;
 
-    // Cari chapter berikutnya setelah chapter terakhir yang diunduh
-    let nextChapterIndex = -1;
-    if (lastDownloadedChapter) {
-      nextChapterIndex = utils.getNextChapterIndex(
-        chapters,
-        lastDownloadedChapter
-      );
+    let info = `Total: ${chapters.length} chapter`;
+    if (chapters.length > 0) {
+      info += `\nPertama: Chapter ${utils.parseChapter(chapters[0])}`;
+      info += `\nTerakhir: Chapter ${utils.parseChapter(chapters[chapters.length - 1])}`;
     }
+    if (downloadedChapters.length > 0) {
+      info += `\nTerunduh: ${downloadedChapters.length} (terakhir: ${lastDownloadedChapter})`;
+      const nextChapterIndex = utils.getNextChapterIndex(chapters, lastDownloadedChapter!);
+      if (nextChapterIndex !== -1) {
+        info += `\nSelanjutnya: Chapter ${utils.parseChapter(chapters[nextChapterIndex])}`;
+      }
+    }
+    note(info, "Status");
 
-    // Opsi unduhan
-    console.log(`\nOpsi Download:`);
-    console.log(`1. Unduh dari chapter tertentu`);
+    const options: { value: string; label: string }[] = [
+      { value: "specific", label: "Unduh dari chapter tertentu" },
+    ];
 
-    // Tampilkan opsi lanjutkan unduhan hanya jika ada chapter terakhir dan ada chapter berikutnya
+    const nextChapterIndex = lastDownloadedChapter
+      ? utils.getNextChapterIndex(chapters, lastDownloadedChapter)
+      : -1;
     if (lastDownloadedChapter && nextChapterIndex !== -1) {
-      const nextChapter = utils.parseChapter(chapters[nextChapterIndex]);
-      console.log(
-        `2. Lanjutkan unduhan dari Chapter ${nextChapter} (setelah Chapter ${lastDownloadedChapter})`
-      );
-    } else if (lastDownloadedChapter) {
-      console.log(`2. [Tidak tersedia] Semua chapter sudah diunduh`);
-    } else {
-      console.log(`2. [Tidak tersedia] Belum ada chapter yang diunduh`);
+      const nextCh = utils.parseChapter(chapters[nextChapterIndex]);
+      options.push({
+        value: "continue",
+        label: `Lanjutkan dari Chapter ${nextCh}`,
+      });
     }
 
-    const downloadOption = prompt("\nPilih opsi (1/2): ");
-    if (!downloadOption) {
-      console.error("Tidak ada opsi yang dipilih");
-      return;
+    const downloadOption = await select({
+      message: "Pilih opsi download:",
+      options,
+    });
+
+    if (isCancel(downloadOption)) {
+      cancel("Dibatalkan.");
+      process.exit(0);
     }
 
     let startIndex = 0;
     let targetChapter = "";
 
-    if (downloadOption === "2") {
-      // Lanjutkan unduhan dari chapter terakhir
-      if (lastDownloadedChapter && nextChapterIndex !== -1) {
-        startIndex = nextChapterIndex;
-        targetChapter = utils.parseChapter(chapters[nextChapterIndex]);
-        console.log(
-          `\n📥 Melanjutkan unduhan dari Chapter ${targetChapter} (setelah Chapter ${lastDownloadedChapter})`
-        );
-      } else {
-        console.error(
-          "Opsi tidak tersedia. Tidak ada chapter berikutnya untuk diunduh."
-        );
-        return;
-      }
+    if (downloadOption === "continue") {
+      startIndex = nextChapterIndex;
+      targetChapter = utils.parseChapter(chapters[nextChapterIndex]);
     } else {
-      // Unduh dari chapter tertentu
-      const chapterInput = prompt(
-        "\nMasukkan chapter (contoh: 35.1 atau 35-1): "
-      );
-      if (!chapterInput) {
-        console.error("Tidak ada chapter yang diberikan");
-        return;
+      const chapterInput = await text({
+        message: "Masukkan chapter (contoh: 35.1 atau 35-1):",
+        placeholder: "35.1",
+      });
+
+      if (isCancel(chapterInput)) {
+        cancel("Dibatalkan.");
+        process.exit(0);
       }
 
       targetChapter = chapterInput;
       const formattedChapter = targetChapter.replace(".", "-");
-      startIndex = this.findChapterIndex(
-        chapters,
-        `chapter-${formattedChapter}`
-      );
-
+      startIndex = this.findChapterIndex(chapters, `chapter-${formattedChapter}`);
       if (startIndex === -1) {
-        console.error("Chapter tidak ditemukan.");
-        return;
+        cancel("Chapter tidak ditemukan.");
+        process.exit(1);
       }
     }
 
     const totalChapters = chapters.length - startIndex;
-    const howManyInput = prompt(
-      `Berapa chapter yang ingin diunduh? (default: ${totalChapters}): `
-    );
-    const howMany = parseInt(howManyInput || `${totalChapters}`);
+    const howManyInput = await text({
+      message: "Berapa chapter yang ingin diunduh?",
+      placeholder: `${totalChapters}`,
+      defaultValue: `${totalChapters}`,
+    });
 
-    if (isNaN(howMany) || howMany < 1) {
-      console.error("Jumlah chapter tidak valid.");
-      return;
+    if (isCancel(howManyInput)) {
+      cancel("Dibatalkan.");
+      process.exit(0);
     }
 
-    console.log(
-      `\n📥 Mengunduh ${howMany} chapter dimulai dari Chapter ${targetChapter}...`
-    );
+    const howMany = parseInt(howManyInput);
+    if (isNaN(howMany) || howMany < 1) {
+      cancel("Jumlah chapter tidak valid.");
+      process.exit(1);
+    }
+
+    note(`Mengunduh ${howMany} chapter dari Chapter ${targetChapter}`, "📥");
 
     for (
       let i = startIndex;
@@ -575,9 +473,8 @@ class ComicProcessor {
       await this.processChapter(chapters[i], comicTitle);
     }
 
-    console.log(`\n✅ Semua download selesai!`);
+    outro("✅ Semua download selesai!");
   }
 }
 
-// Run the application
 new ComicProcessor().start();
