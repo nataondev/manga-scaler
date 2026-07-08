@@ -12,52 +12,62 @@
 
 ## Apa ini?
 
-Manga Scaler adalah tools CLI buat download komik dari berbagai situs, auto perbesar gambar pake AI (waifu2x) biar tajem, terus dikonversi ke WebP biar ukurannya kecil. Ada web viewer buat baca hasil downloadannya langsung di browser.
+Manga Scaler adalah tools CLI buat download komik dari berbagai situs, auto perbesar gambar pake AI (waifu2x), terus dikonversi ke WebP. Ada web viewer Svelte + Tailwind buat baca dan manage hasil download-an langsung di browser.
 
 ## Fitur
 
-- 🖥️ **TUI interaktif** — tinggal ketik `manga-scaler scrap`, pilih dari menu
-- ⚡ **CLI mode** — `manga-scaler scrap <url> -c 5 -n 3` buat scripting
-- 🧠 **AI Upscale** — gambar <900px diperbesar otomatis pake waifu2x
-- 📖 **Web Viewer** — baca komik di browser, tinggal `manga-scaler serve`
-- 💾 **Resume otomatis** — kalau mati tengah jalan, lanjut dari chapter terakhir
-- 🌍 **Multi OS** — Linux, macOS, Windows, auto-deteksi folder config
+- 🖥️ **TUI interaktif** — `manga-scaler scrap`, pilih dari menu
+- ⚡ **CLI mode** — `manga-scaler scrap <url> -c 5 -n 3`
+- 🧠 **AI Upscale** — gambar ≤950px diperbesar otomatis pake waifu2x-ncnn-vulkan
+- 📖 **Web Viewer (Svelte)** — grid manga, detail metadata, reader dengan tap zone
+- 📋 **Chapter Manager** — lihat semua chapter, download/hapus per chapter, progress bar live
+- 🔄 **Job tracking** — SSE real-time progress + cancel job
+- 💾 **Resume otomatis** — lanjut dari chapter terakhir
+- 🌍 **Multi OS** — Linux, macOS, Windows
 
 ## Install
 
-### Requirement
+### 1-command install
 
-- **[Bun](https://bun.sh)** `>=1.3`
-- **[waifu2x-ncnn-vulkan](https://github.com/nihui/waifu2x-ncnn-vulkan/releases)** — download binary, taruh di PATH
+```bash
+./install.sh
+```
 
-### Install global
+Ini nge-handle semuanya:
+- Install Bun (kalo belum ada)
+- Auto-download waifu2x-ncnn-vulkan sesuai OS (dari GitHub releases)
+- Install dependensi backend
+- Build frontend Svelte
+- Buat `.env` otomatis
+
+### Atau install manual
+
+```bash
+git clone https://github.com/nataondev/manga-scaler
+cd manga-scaler
+bun install
+cd frontend && bun install && bun run build && cd ..
+```
+
+### Install global (dari repo)
 
 ```bash
 bun add -g github:nataondev/manga-scaler
 ```
 
-Setelah itu command `manga-scaler` bisa dipake dari mana aja.
-
-### Atau clone manual
-
-```bash
-git clone https://github.com/nataondev/manga-scaler
-cd manga-scaler && bun install
-```
-
-Kalau clone manual, pakenya pake `bun bin.ts serve` / `bun bin.ts scrap`.
+Command `manga-scaler` bisa dipake dari mana aja.
 
 ## Cara Pakai
 
 ### 1. Download komik
 
 ```bash
-# Mode TUI (ada menunya)
+# Mode TUI
 manga-scaler scrap
 
-# Atau langsung CLI
+# CLI langsung
 manga-scaler scrap https://komiku.org/manga/one-piece/
-manga-scaler scrap https://komiku.org/manga/one-piece/ -c 5 -n 3   # mulai chapter 5, 3 chapter
+manga-scaler scrap https://komiku.org/manga/one-piece/ -c 5 -n 3
 
 # Cek history
 manga-scaler scrap --history
@@ -66,32 +76,42 @@ manga-scaler scrap --history
 ### 2. Baca di browser
 
 ```bash
-manga-scaler serve
+manga-scaler serve     # atau: bun serve
 ```
 
-Buka `http://localhost:5000` — udah ada grid cover, detail metadata, reader.
+Buka `http://localhost:5000`.
 
-### 3. Setting config
+**Reader:**
+- **Grid** — cover manga, search judul
+- **Detail** — metadata lengkap + list chapter. Klik "Kelola Chapter" buat buka modal download manager.
+- **Reader** — tap zone untuk navigasi: atas scroll up 500px, tengah toggle header/footer, bawah scroll down 500px. Keyboard: ← → buat ganti chapter.
 
-Config otomatis dibuat pas pertama kali jalan. Tapi bisa diedit:
+**Job tab:** progress bar live, cancel job. Bisa scrape langsung dari sini — paste URL.
 
-**Linux/macOS:** `~/.config/manga-scaler/.env`
-**Windows:** `%APPDATA%\manga-scaler\.env`
+### 3. Manage chapter dari UI
+
+Klik "Kelola Chapter" di detail page → modal popup:
+- List semua chapter dari remote (✓ = downloaded, abu-abu = belum)
+- Download per chapter + progress bar real-time
+- Hapus chapter yang udah didownload
+- "Download semua baru" buat download chapter yang belum ada
+
+### 4. Config
+
+Config di `~/.config/manga-scaler/.env` (Linux) atau `%APPDATA%\manga-scaler\.env` (Windows):
 
 ```env
 WEB_SERVER_PORT=5000
-WAIFU2X_PATH=/usr/local/bin/waifu2x-ncnn-vulkan
-MIN_IMAGE_WIDTH=900          # gambar di bawah ini di-upscale
+WAIFU2X_PATH=~/Repos/tools/waifu2x/waifu2x-ncnn-vulkan
+MIN_IMAGE_WIDTH=950          # gambar ≤950px di-upscale, >950px skip
 WEBP_QUALITY=85
 NOISE_REDUCTION=2
 SCALE_FACTOR=2
 ```
 
-Bisa juga override bikin `.env` di folder project yang lagi lo kerjain.
+Override: bikin `.env` di folder project yang sedang dipakai.
 
-## Output di mana?
-
-Hasil download disimpen otomatis:
+## Output
 
 | OS | Lokasi |
 |----|--------|
@@ -99,28 +119,50 @@ Hasil download disimpen otomatis:
 | macOS | `~/Library/Application Support/manga-scaler/komik/` |
 | Windows | `%LOCALAPPDATA%\manga-scaler\komik\` |
 
-## Situs yang didukung
+## Situs didukung
 
 - komiku.org
 - mangapill.com
 - mangatown.com
 
-Mau nambah situs lain? Bisa, liat [docs/development.md](docs/development.md).
+Nambah situs? Cek [docs/development.md](docs/development.md).
 
 ## REST API
 
-Server juga serve REST API. Detail lengkap di [docs/development.md](docs/development.md).
-
-Cepetnya:
-
 ```bash
-# Trigger scrap dari HTTP
-curl -X POST http://localhost:5000/api/scrap \
+# Trigger scrap
+curl -X POST localhost:5000/api/scrap \
   -H 'Content-Type: application/json' \
   -d '{"url":"https://komiku.org/manga/one-piece/", "count": 3}'
 
-# Cek status
-curl http://localhost:5000/api/jobs
+# Cek status job
+curl localhost:5000/api/jobs
+
+# Check update (detect chapter baru)
+curl -X POST localhost:5000/api/scrap/check \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://..."}'
+
+# SSE job events
+curl localhost:5000/api/jobs/events
+
+# Cancel job
+curl -X POST localhost:5000/api/jobs/<id>/cancel
+```
+
+Detail lengkap di [docs/development.md](docs/development.md).
+
+## Development
+
+```bash
+# Backend
+bun serve
+
+# Frontend dev (hot reload)
+cd frontend && bun run dev
+
+# Test
+bun test
 ```
 
 ## Lisensi
