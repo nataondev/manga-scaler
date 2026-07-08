@@ -14,7 +14,10 @@ import {
   isChapterComplete,
   getDownloadedChapters,
   getComicHistory,
+  deleteChapter,
+  getAllChapters,
 } from "./db";
+export { deleteChapter, getAllChapters };
 
 export function slugify(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -60,7 +63,7 @@ const env = loadConfig();
 export const CONFIG = {
   WAIFU2X_PATH: env.WAIFU2X_PATH || "~/Repos/tools/waifu2x/waifu2x-ncnn-vulkan",
   OUTPUT_DIR: env.OUTPUT_DIR || join(paths.data, "komik"),
-  MIN_IMAGE_WIDTH: parseInt(env.MIN_IMAGE_WIDTH || "900"),
+  MIN_IMAGE_WIDTH: parseInt(env.MIN_IMAGE_WIDTH || "950"),
   WEBP_QUALITY: parseInt(env.WEBP_QUALITY || "85"),
   NOISE_REDUCTION: env.NOISE_REDUCTION || "2",
   SCALE_FACTOR: env.SCALE_FACTOR || "2",
@@ -183,7 +186,7 @@ export class ImageProcessor {
       const meta = await sharp(buf).metadata();
       const origWidth = meta.width || 0;
 
-      if (origWidth >= CONFIG.MIN_IMAGE_WIDTH) {
+      if (origWidth > CONFIG.MIN_IMAGE_WIDTH) {
         message(`${index + 1} (${origWidth}px), direct WebP...`);
         unlinkSync(rawPath);
         await sharp(buf)

@@ -96,7 +96,7 @@ describe("core", () => {
 });
 
 // engine
-import { detectScraper, listScrapers } from "../lib/engine";
+import { detectScraper, listScrapers, cancelJob, subscribeSSE, getJob, getAllJobs } from "../lib/engine";
 
 describe("engine", () => {
   it("listScrapers returns all", () => {
@@ -123,10 +123,28 @@ describe("engine", () => {
   it("detectScraper unknown returns null", () => {
     expect(detectScraper("https://google.com")).toBeNull();
   });
+
+  it("cancelJob returns false for nonexistent job", () => {
+    expect(cancelJob("nonexistent")).toBe(false);
+  });
+
+  it("subscribeSSE returns unsubscribe function", () => {
+    const unsub = subscribeSSE(() => {});
+    expect(typeof unsub).toBe("function");
+    unsub();
+  });
+
+  it("getAllJobs returns empty initially", () => {
+    expect(Array.isArray(getAllJobs())).toBe(true);
+  });
+
+  it("getJob returns undefined for nonexistent", () => {
+    expect(getJob("nonexistent")).toBeUndefined();
+  });
 });
 
 // db
-import { getDb, upsertComic, getComicHistory, getDownloadedChapters, upsertChapter, isChapterComplete, markChapterComplete } from "../lib/db";
+import { getDb, upsertComic, getComicHistory, getDownloadedChapters, upsertChapter, isChapterComplete, markChapterComplete, getComicBySlug } from "../lib/db";
 
 describe("db", () => {
   const now = Date.now();
@@ -147,6 +165,18 @@ describe("db", () => {
   it("getComicHistory returns entries", () => {
     const hist = getComicHistory(100) as any[];
     expect(hist.some((h: any) => h.slug === testSlug)).toBe(true);
+  });
+
+  it("getComicBySlug returns correct comic", () => {
+    const comic = getComicBySlug(testSlug) as any;
+    expect(comic).toBeDefined();
+    expect(comic.slug).toBe(testSlug);
+    expect(comic.url).toBe(testUrl);
+  });
+
+  it("getComicBySlug returns null for unknown slug", () => {
+    const comic = getComicBySlug("does-not-exist-xyz");
+    expect(comic).toBeNull();
   });
 
   it("upsertChapter dan isChapterComplete", () => {

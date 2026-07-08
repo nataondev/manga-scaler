@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { serve } from "bun";
-import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { CONFIG } from "./lib/core";
 import { paths } from "./lib/paths";
@@ -10,8 +10,12 @@ import {
   scrape,
   getJob,
   getAllJobs,
+  cancelJob,
+  subscribeSSE,
   type ScrapeJob,
 } from "./lib/engine";
+import { getDownloadedChapters, slugify, saveMetadata, deleteChapter, getAllChapters } from "./lib/core";
+import { getComicBySlug } from "./lib/db";
 
 mkdirSync(paths.config, { recursive: true });
 const envFile = join(paths.config, ".env");
@@ -113,11 +117,118 @@ async function handleRequest(req: Request): Promise<Response> {
     return withCORS(new Response(JSON.stringify(getAllJobs()), { status: 200, headers: { "Content-Type": "application/json" } }));
   }
 
-  if (req.method === "GET" && path.startsWith("/api/jobs/")) {
+  if (req.method === "GET" && path === "/api/jobs/events") {
+    const stream = new ReadableStream({
+      start(controller) {
+        // kirim semua job saat ini sebagai initial state
+        for (const job of getAllJobs()) {
+          controller.enqueue(`data: ${JSON.stringify(job)}\n\n`);
+        }
+        // heartbeat tiap 15s biar gak idle timeout
+        const ping = setInterval(() => {
+          controller.enqueue(": keepalive\n\n");
+        }, 15000);
+        const unsub = subscribeSSE((job) => {
+          controller.enqueue(`data: ${JSON.stringify(job)}\n\n`);
+        });
+        req.signal.addEventListener("abort", () => {
+          clearInterval(ping);
+          unsub();
+        });
+      },
+    });
+    return withCORS(new Response(stream, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" },
+    }));
+  }
+
+  if (req.method === "POST" && path.match(/^\/api\/jobs\/[^/]+\/cancel$/)) {
+    const jobId = path.split("/")[3];
+    const ok = cancelJob(jobId);
+    const status = ok ? 200 : 404;
+    return withCORS(new Response(JSON.stringify({ cancelled: ok }), { status, headers: { "Content-Type": "application/json" } }));
+  }
+
+  if (req.method === "GET" && path.startsWith("/api/jobs/") && !path.endsWith("/cancel")) {
     const jobId = path.split("/").pop()!;
     const job = getJob(jobId);
     if (!job) return withCORS(new Response(JSON.stringify({ error: "not found" }), { status: 404, headers: { "Content-Type": "application/json" } }));
     return withCORS(new Response(JSON.stringify(job), { status: 200, headers: { "Content-Type": "application/json" } }));
+  }
+
+  if (req.method === "POST" && path === "/api/scrap/check") {
+    try {
+      const body: { url: string } = await req.json();
+      if (!body.url) return withCORS(new Response(JSON.stringify({ error: "url required" }), { status: 400, headers: { "Content-Type": "application/json" } }));
+
+      const scraper = detectScraper(body.url);
+      if (!scraper) return withCORS(new Response(JSON.stringify({ error: `No scraper for ${new URL(body.url).hostname}` }), { status: 400, headers: { "Content-Type": "application/json" } }));
+
+      const comicTitle = await scraper.getComicTitle(body.url);
+      const realSlug = slugify(comicTitle);
+      const comic = getComicBySlug(realSlug) as any;
+      const chapters = await scraper.listChapters(body.url);
+
+      if (!comic) {
+        return withCORS(new Response(JSON.stringify({ newChapters: chapters, total: chapters.length }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+
+      const downloaded = getDownloadedChapters(comic.id);
+      const downloadedSet = new Set(downloaded.map(String));
+      const newChapters = chapters.filter(c => !downloadedSet.has(scraper.parseChapter(c.url)));
+
+      const allChapters = chapters.map(c => ({
+        label: c.label,
+        url: c.url,
+        chapter_num: scraper.parseChapter(c.url),
+        downloaded: downloadedSet.has(scraper.parseChapter(c.url)),
+      }));
+
+      if (scraper.getMetadata) {
+        const meta = await scraper.getMetadata(body.url);
+        saveMetadata(realSlug, meta, scraper.referer);
+      }
+
+      return withCORS(new Response(JSON.stringify({
+        url: body.url,
+        total: chapters.length,
+        downloaded: downloaded.length,
+        newChapters: newChapters.map(c => ({ label: c.label, url: c.url })),
+        allChapters,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    } catch (e) {
+      return withCORS(new Response(JSON.stringify({ error: e instanceof Error ? e.message : "check failed" }), { status: 500, headers: { "Content-Type": "application/json" } }));
+    }
+  }
+
+  if (req.method === "GET" && path.startsWith("/api/comic/") && path.endsWith("/meta")) {
+    const slug = path.split("/")[3];
+    const comic = getComicBySlug(slug) as any;
+    if (!comic) return withCORS(new Response(JSON.stringify({ error: "not found" }), { status: 404, headers: { "Content-Type": "application/json" } }));
+    return withCORS(new Response(JSON.stringify({ url: comic.url, source: comic.source, title: comic.title }), { status: 200, headers: { "Content-Type": "application/json" } }));
+  }
+
+  if (req.method === "GET" && path.startsWith("/api/comic/") && path.endsWith("/chapters")) {
+    const slug = path.split("/")[3];
+    const comic = getComicBySlug(slug) as any;
+    if (!comic) return withCORS(new Response(JSON.stringify({ error: "not found" }), { status: 404, headers: { "Content-Type": "application/json" } }));
+    const chaps = getAllChapters(comic.id);
+    return withCORS(new Response(JSON.stringify(chaps), { status: 200, headers: { "Content-Type": "application/json" } }));
+  }
+
+  if (req.method === "DELETE" && path.startsWith("/api/comic/") && path.endsWith("/chapter")) {
+    const slug = path.split("/")[3];
+    const chapterNum = url.searchParams.get("chapter");
+    if (!chapterNum) return withCORS(new Response(JSON.stringify({ error: "chapter required" }), { status: 400, headers: { "Content-Type": "application/json" } }));
+    const comic = getComicBySlug(slug) as any;
+    if (!comic) return withCORS(new Response(JSON.stringify({ error: "not found" }), { status: 404, headers: { "Content-Type": "application/json" } }));
+    const ok = deleteChapter(comic.id, chapterNum);
+    if (ok) {
+      const chapDir = join(CONFIG.OUTPUT_DIR, slug, chapterNum);
+      try { rmSync(chapDir, { recursive: true, force: true }); } catch {}
+    }
+    return withCORS(new Response(JSON.stringify({ deleted: ok }), { status: ok ? 200 : 404, headers: { "Content-Type": "application/json" } }));
   }
 
   // === Web Viewer ===
@@ -126,8 +237,8 @@ async function handleRequest(req: Request): Promise<Response> {
     return withCORS(new Response(html, { status: 200, headers: { "Content-Type": "text/html" } }));
   }
 
-  if (path.startsWith("/public/")) {
-    const subpath = path.slice("/public/".length);
+  if (path.startsWith("/public/") || path.startsWith("/assets/")) {
+    const subpath = path.startsWith("/public/") ? path.slice("/public/".length) : path.slice(1);
     const contentType = subpath.endsWith(".css") ? "text/css"
       : subpath.endsWith(".js") ? "application/javascript"
       : subpath.endsWith(".png") ? "image/png"
@@ -236,7 +347,7 @@ async function handleRequest(req: Request): Promise<Response> {
   return withCORS(new Response("Not Found", { status: 404 }));
 }
 
-serve({ fetch: handleRequest, port, hostname: "0.0.0.0" });
+serve({ fetch: handleRequest, port, hostname: "0.0.0.0", idleTimeout: 255 });
 
 console.clear();
 console.log(`📚 manga-scaler server`);

@@ -46,6 +46,8 @@ export interface ScrapeJob {
 type JobCallback = (job: ScrapeJob) => void;
 
 const jobs = new Map<string, ScrapeJob>();
+const cancelTokens = new Map<string, boolean>();
+let sseListeners: Array<(job: ScrapeJob) => void> = [];
 
 export function getJob(id: string): ScrapeJob | undefined {
   return jobs.get(id);
@@ -53,6 +55,22 @@ export function getJob(id: string): ScrapeJob | undefined {
 
 export function getAllJobs(): ScrapeJob[] {
   return [...jobs.values()];
+}
+
+export function cancelJob(id: string): boolean {
+  const job = jobs.get(id);
+  if (!job || job.status !== "running") return false;
+  cancelTokens.set(id, true);
+  return true;
+}
+
+export function subscribeSSE(fn: (job: ScrapeJob) => void) {
+  sseListeners.push(fn);
+  return () => { sseListeners = sseListeners.filter(l => l !== fn); };
+}
+
+function broadcast(job: ScrapeJob) {
+  for (const fn of sseListeners) fn(job);
 }
 
 export async function scrape(
@@ -70,6 +88,8 @@ export async function scrape(
     return;
   }
 
+  const notify = (j: ScrapeJob) => { onChange(j); broadcast(j); };
+
   const j = newJob(jobId, url, "preparing");
   j.source = scraper.name;
 
@@ -85,19 +105,32 @@ export async function scrape(
   j.title = comicTitle;
   j.totalChapters = chapters.length;
   j.status = "running";
-  onChange(j);
+  notify(j);
 
   const end = Math.min(startIndex + count, chapters.length);
   for (let i = startIndex; i < end; i++) {
+    if (cancelTokens.get(jobId)) {
+      j.status = "failed";
+      j.error = "Cancelled";
+      notify(j);
+      cancelTokens.delete(jobId);
+      return;
+    }
     j.currentChapterIndex = i;
     j.currentChapterLabel = chapters[i].label;
-    onChange(j);
-    await processChapter(chapters[i], slug, comicId, scraper, j, jobId, onChange);
+    notify(j);
+    try {
+      await processChapter(chapters[i], slug, comicId, scraper, j, jobId, notify);
+    } catch (e) {
+      j.failedImages += j.totalImagesInChapter || 0;
+      j.message = e instanceof Error ? e.message : "chapter error";
+      notify(j);
+    }
   }
 
   j.status = "done";
   j.message = "Selesai";
-  onChange(j);
+  notify(j);
 }
 
 async function processChapter(
@@ -169,6 +202,7 @@ function newJob(id: string, url: string, status: ScrapeJob["status"]): ScrapeJob
     message: "",
   };
   jobs.set(id, j);
+  // ponytail: broadcast hanya dari notify() dalam scrape, bukan dari newJob kosong
   return j;
 }
 

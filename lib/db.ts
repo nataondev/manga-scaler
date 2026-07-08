@@ -84,6 +84,10 @@ export function getComicById(id: number) {
   return getDb().query("SELECT * FROM comics WHERE id = ?").get(id);
 }
 
+export function getComicBySlug(slug: string) {
+  return getDb().query("SELECT * FROM comics WHERE slug = ?").get(slug);
+}
+
 // Chapters
 export function upsertChapter(comicId: number, chapterNum: string, chapterUrl: string, totalImages: number) {
   const d = getDb();
@@ -168,4 +172,17 @@ export function getChapterImages(chapterId: number) {
   return getDb().query(
     "SELECT idx, src FROM images WHERE chapter_id = ? AND status != 'failed' ORDER BY idx"
   ).all(chapterId) as { idx: number; src: string }[];
+}
+
+export function deleteChapter(comicId: number, chapterNum: string): boolean {
+  const d = getDb();
+  const chapter = d.query("SELECT id FROM chapters WHERE comic_id = ? AND chapter_num = ?").get(comicId, chapterNum) as any;
+  if (!chapter) return false;
+  d.run("DELETE FROM images WHERE chapter_id = ?", [chapter.id]);
+  d.run("DELETE FROM chapters WHERE id = ?", [chapter.id]);
+  return true;
+}
+
+export function getAllChapters(comicId: number) {
+  return getDb().query("SELECT chapter_num, chapter_url, status FROM chapters WHERE comic_id = ? ORDER BY chapter_num").all(comicId) as { chapter_num: string; chapter_url: string; status: string }[];
 }
