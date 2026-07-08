@@ -146,7 +146,7 @@ export const utils = {
   },
 
   async waifu2x(inputPath: string, outputPath: string): Promise<void> {
-    const cmd = `${CONFIG.WAIFU2X_PATH} -i "${inputPath}" -o "${outputPath}" -f webp -n ${CONFIG.NOISE_REDUCTION} -s ${CONFIG.SCALE_FACTOR}`;
+    const cmd = `${CONFIG.WAIFU2X_PATH} -i "${inputPath}" -o "${outputPath}" -f png -n ${CONFIG.NOISE_REDUCTION} -s ${CONFIG.SCALE_FACTOR}`;
     return new Promise((resolve, reject) => {
       exec(cmd, (error) => (error ? reject(error) : resolve()));
     });
@@ -194,8 +194,13 @@ export class ImageProcessor {
           .toFile(outputPath);
       } else {
         message(`${index + 1} AI upscale → WebP (${origWidth}px)...`);
-        await utils.waifu2x(rawPath, outputPath);
+        const upscaleTmp = rawPath.replace(/\.[^.]+$/, ".upscale.png");
+        await utils.waifu2x(rawPath, upscaleTmp);
         unlinkSync(rawPath);
+        await sharp(upscaleTmp)
+          .webp({ quality: CONFIG.WEBP_QUALITY })
+          .toFile(outputPath);
+        unlinkSync(upscaleTmp);
       }
 
       const outputSize = statSync(outputPath).size;
