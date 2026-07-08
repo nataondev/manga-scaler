@@ -4,7 +4,7 @@ Tools untuk scraping komik dari berbagai situs, auto upscale gambar dengan **wai
 
 ## Fitur
 
-- **Multi-source**: komiku.org, mangatown.com (mudah tambah situs baru via plugin)
+- **Multi-source**: komiku.org, mangapill.com, mangatown.com (mudah tambah situs baru via plugin)
 - **AI Upscale**: waifu2x-ncnn-vulkan untuk gambar <900px width
 - **WebP Compression**: sharp WebP quality 85%, file jauh lebih kecil
 - **Web Viewer**: baca komik langsung di browser
@@ -45,6 +45,7 @@ SCALE_FACTOR=2            # waifu2x scale factor
 │   ├── db.ts             # SQLite schema + CRUD
 │   └── sites/
 │       ├── komiku.ts     # Scraper komiku.org
+│       ├── mangapill.ts  # Scraper mangapill.com
 │       └── mangatown.ts  # Scraper mangatown.com
 ├── public/               # Web viewer frontend
 ├── data/                 # SQLite database
