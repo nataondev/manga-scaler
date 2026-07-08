@@ -1,12 +1,16 @@
 import { Database } from "bun:sqlite";
-import path from "path";
+import { join } from "path";
+import { mkdirSync } from "fs";
+import { paths } from "./paths";
 
-const DB_PATH = path.join(import.meta.dir, "..", "data", "manga.db");
+const DB_DIR = join(paths.data, "data");
+const DB_PATH = join(DB_DIR, "manga.db");
 
 let db: Database;
 
 export function getDb(): Database {
   if (!db) {
+    mkdirSync(DB_DIR, { recursive: true });
     db = new Database(DB_PATH);
     db.run("PRAGMA journal_mode = WAL");
     db.run("PRAGMA foreign_keys = ON");

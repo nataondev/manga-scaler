@@ -1,7 +1,10 @@
 {
-  "name": "komiku-scrap",
-  "module": "index.ts",
+  "name": "manga-scaler",
+  "version": "1.0.0",
   "type": "module",
+  "bin": {
+    "manga-scaler": "./bin.ts"
+  },
   "scripts": {
     "scrap": "bun scrap.ts",
     "serve": "bun index.ts"
@@ -17,7 +20,13 @@
     "@clack/prompts": "^1.7.0",
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
-    "dotenv": "^16.4.7",
     "sharp": "^0.35.3"
-  }
+  },
+  "files": [
+    "bin.ts",
+    "index.ts",
+    "scrap.ts",
+    "lib/",
+    "public/"
+  ]
 }

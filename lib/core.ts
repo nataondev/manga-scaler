@@ -1,9 +1,9 @@
-import fs from "fs";
-import path from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, statSync } from "fs";
+import { join } from "path";
 import { exec } from "child_process";
 import axios from "axios";
 import sharp from "sharp";
-import dotenv from "dotenv";
+import { paths } from "./paths";
 import {
   upsertComic,
   upsertChapter,
@@ -16,19 +16,55 @@ import {
   getComicHistory,
 } from "./db";
 
-dotenv.config();
-
 export function slugify(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+function loadEnvFile(filePath: string): Record<string, string> {
+  try {
+    const content = readFileSync(filePath, "utf-8");
+    const env: Record<string, string> = {};
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq === -1) continue;
+      env[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
+    }
+    return env;
+  } catch {
+    return {};
+  }
+}
+
+function loadConfig(): Record<string, string> {
+  const layers: Record<string, string>[] = [];
+
+  layers.push(loadEnvFile(join(paths.config, ".env")));
+
+  const cwdEnv = loadEnvFile(".env");
+  if (Object.keys(cwdEnv).length) layers.push(cwdEnv);
+
+  layers.push(Object.fromEntries(
+    Object.entries(process.env).filter(([k]) =>
+      ["WAIFU2X_PATH", "OUTPUT_DIR", "MIN_IMAGE_WIDTH", "WEBP_QUALITY",
+       "NOISE_REDUCTION", "SCALE_FACTOR", "WEB_SERVER_PORT"].includes(k)
+    )
+  ) as Record<string, string>);
+
+  return Object.assign({}, ...layers);
+}
+
+const env = loadConfig();
+
 export const CONFIG = {
-  WAIFU2X_PATH: process.env.WAIFU2X_PATH || "~/Repos/tools/waifu2x/waifu2x-ncnn-vulkan",
-  OUTPUT_DIR: process.env.OUTPUT_DIR || path.join(import.meta.dir, "..", "komik"),
-  MIN_IMAGE_WIDTH: parseInt(process.env.MIN_IMAGE_WIDTH || "900"),
-  WEBP_QUALITY: parseInt(process.env.WEBP_QUALITY || "85"),
-  NOISE_REDUCTION: process.env.NOISE_REDUCTION || "2",
-  SCALE_FACTOR: process.env.SCALE_FACTOR || "2",
+  WAIFU2X_PATH: env.WAIFU2X_PATH || "~/Repos/tools/waifu2x/waifu2x-ncnn-vulkan",
+  OUTPUT_DIR: env.OUTPUT_DIR || join(paths.data, "komik"),
+  MIN_IMAGE_WIDTH: parseInt(env.MIN_IMAGE_WIDTH || "900"),
+  WEBP_QUALITY: parseInt(env.WEBP_QUALITY || "85"),
+  NOISE_REDUCTION: env.NOISE_REDUCTION || "2",
+  SCALE_FACTOR: env.SCALE_FACTOR || "2",
+  WEB_SERVER_PORT: parseInt(env.WEB_SERVER_PORT || "5000"),
 } as const;
 
 export interface ImageData {
@@ -84,13 +120,13 @@ export const utils = {
   },
 
   ensureFolderExists(folderPath: string): void {
-    if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
+    if (!existsSync(folderPath)) mkdirSync(folderPath, { recursive: true });
   },
 
   getImageSavePath(slug: string, chapter: string, fileName: string): string {
-    const folderPath = path.join(CONFIG.OUTPUT_DIR, slug, chapter);
+    const folderPath = join(CONFIG.OUTPUT_DIR, slug, chapter);
     this.ensureFolderExists(folderPath);
-    return path.join(folderPath, fileName);
+    return join(folderPath, fileName);
   },
 
   getNextChapterIndex(
@@ -142,30 +178,30 @@ export class ImageProcessor {
         return Buffer.from(res.data);
       });
 
-      fs.writeFileSync(rawPath, buf);
+      writeFileSync(rawPath, new Uint8Array(buf));
       const rawSize = buf.length;
       const meta = await sharp(buf).metadata();
       const origWidth = meta.width || 0;
 
       if (origWidth >= CONFIG.MIN_IMAGE_WIDTH) {
         message(`${index + 1} (${origWidth}px), direct WebP...`);
-        fs.unlinkSync(rawPath);
+        unlinkSync(rawPath);
         await sharp(buf)
           .webp({ quality: CONFIG.WEBP_QUALITY })
           .toFile(outputPath);
       } else {
         message(`${index + 1} AI upscale → WebP (${origWidth}px)...`);
         await utils.waifu2x(rawPath, outputPath);
-        fs.unlinkSync(rawPath);
+        unlinkSync(rawPath);
       }
 
-      const outputSize = fs.statSync(outputPath).size;
+      const outputSize = statSync(outputPath).size;
       markImageDone(chapterId, index + 1, outputFile, rawSize, outputSize);
       return true;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`Error image ${index + 1}:`, msg);
-      try { if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath); } catch {}
+      try { if (existsSync(rawPath)) unlinkSync(rawPath); } catch {}
       markImageFailed(chapterId, index + 1, msg);
       return false;
     }
@@ -178,21 +214,21 @@ export function resolveComic(title: string, url: string, source: string) {
 }
 
 export function saveMetadata(slug: string, metadata: ComicMetadata, referer?: string): void {
-  const folder = path.join(CONFIG.OUTPUT_DIR, slug);
+  const folder = join(CONFIG.OUTPUT_DIR, slug);
   utils.ensureFolderExists(folder);
 
   if (metadata.coverUrl) {
     downloadCover(metadata.coverUrl, folder, referer);
   }
 
-  const file = path.join(folder, "metadata.json");
+  const file = join(folder, "metadata.json");
   const cleaned: any = {};
   for (const [k, v] of Object.entries(metadata)) {
     if (v !== undefined && (Array.isArray(v) ? v.length > 0 : v !== "")) {
       cleaned[k] = v;
     }
   }
-  fs.writeFileSync(file, JSON.stringify(cleaned, null, 2));
+  writeFileSync(file, JSON.stringify(cleaned, null, 2));
 }
 
 async function downloadCover(coverUrl: string, folder: string, referer?: string) {
@@ -203,7 +239,7 @@ async function downloadCover(coverUrl: string, folder: string, referer?: string)
       headers: referer ? { Referer: referer } : {},
     });
     const ext = coverUrl.match(/\.(jpg|jpeg|png|gif|webp)/i)?.[1] || "jpg";
-    fs.writeFileSync(path.join(folder, `cover.${ext}`), Buffer.from(res.data));
+    writeFileSync(join(folder, `cover.${ext}`), new Uint8Array(Buffer.from(res.data)));
   } catch {}
 }
 
