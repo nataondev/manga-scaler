@@ -25,9 +25,8 @@ import {
 import { komikuScraper } from "./lib/sites/komiku";
 import { mangatownScraper } from "./lib/sites/mangatown";
 import { mangapillScraper } from "./lib/sites/mangapill";
-import { westmangaScraper } from "./lib/sites/westmanga";
 
-const SCRAPERS: SiteScraper[] = [komikuScraper, mangatownScraper, mangapillScraper, westmangaScraper];
+const SCRAPERS: SiteScraper[] = [komikuScraper, mangatownScraper, mangapillScraper];
 const PAGE_SIZE = 10;
 
 function detectScraper(url: string): SiteScraper | null {
