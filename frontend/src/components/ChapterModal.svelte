@@ -29,6 +29,7 @@
   let result = $state<CheckResult | null>(null);
   let loading = $state(false);
   let activeJobId = $state<string | null>(null);
+  let targetChapterNum = $state<string | null>(null);
   let mangaUrl = $state("");
 
   let currentJob = $derived(
@@ -38,9 +39,8 @@
   let progressPct = $derived(
     (() => {
       const j = currentJob;
-      if (!j || j.totalChapters === 0) return 0;
-      const imgInCh = j.totalImagesInChapter > 0 ? j.currentImageIndex / j.totalImagesInChapter : 0;
-      return Math.round(((j.currentChapterIndex + imgInCh) / j.totalChapters) * 100);
+      if (!j || j.totalImagesInChapter === 0) return 0;
+      return Math.round((j.currentImageIndex / j.totalImagesInChapter) * 100);
     })(),
   );
 
@@ -65,6 +65,7 @@
     if (!mangaUrl || activeJobId) return;
     const chaps = result?.allChapters ?? [];
     const idx = chapterNum ? chaps.findIndex((c) => c.chapter_num === chapterNum) : 0;
+    targetChapterNum = chapterNum ?? null;
     const res = await api.startScrape(mangaUrl, idx >= 0 ? idx : 0, chapterNum ? 1 : 99999);
     activeJobId = res.jobId;
   }
@@ -80,6 +81,7 @@
     const j = currentJob;
     if (j && (j.status === "done" || j.status === "failed")) {
       activeJobId = null;
+      targetChapterNum = null;
       if (mangaUrl) {
         api.checkUpdate(mangaUrl).then((r) => (result = r));
       }
@@ -128,9 +130,16 @@
           </div>
 
           {#if activeJobId}
-            <div class="mb-3 p-3 rounded-lg bg-neutral-800/80 border border-violet-800/50">
+            <div class="sticky top-0 z-10 mb-3 p-3 rounded-lg bg-neutral-800/80 border border-violet-800/50">
               <div class="flex items-center justify-between mb-1.5">
-                <span class="text-xs text-violet-300">{currentJob?.message || "Scraping..."}</span>
+                <div>
+                  <span class="text-xs text-violet-300">
+                    {targetChapterNum ?? "Downloading"}
+                  </span>
+                  <span class="text-xs text-neutral-500 ml-2">
+                    Gambar {currentJob?.currentImageIndex ?? 0}/{currentJob?.totalImagesInChapter ?? 0}
+                  </span>
+                </div>
                 <button
                   class="px-2 py-0.5 text-xs rounded border border-red-800 text-red-400 hover:bg-red-900 transition"
                   onclick={cancelJob}
